@@ -27,27 +27,27 @@ export const REVIEW_ROLES = [ROLES.ADMIN, ROLES.HEAD_OFFICE]
 export const NAV_SECTIONS = [
   {
     label: 'Overview',
-    items: [{ to: '/', label: 'Dashboard', end: true, roles: ALL_ROLES }],
+    items: [{ to: '/', label: 'Dashboard', icon: 'dashboard', end: true, roles: ALL_ROLES }],
   },
   {
     label: 'Operations',
     items: [
-      { to: '/customers', label: 'Customers', roles: ALL_ROLES },
-      { to: '/documents/upload', label: 'Upload document', roles: ALL_ROLES },
-      { to: '/agreements', label: 'Agreements', roles: ALL_ROLES },
-      { to: '/proposals', label: 'Proposals', roles: ALL_ROLES },
+      { to: '/customers', label: 'Customers', icon: 'customers', roles: ALL_ROLES },
+      { to: '/documents/upload', label: 'Upload document', icon: 'upload', roles: ALL_ROLES },
+      { to: '/agreements', label: 'Agreements', icon: 'agreements', roles: ALL_ROLES },
+      { to: '/proposals', label: 'Proposals', icon: 'proposals', roles: ALL_ROLES },
     ],
   },
   {
     label: 'Oversight',
     items: [
-      { to: '/employees', label: 'Employees', roles: REVIEW_ROLES },
-      { to: '/admin/reports', label: 'Reports', roles: REVIEW_ROLES },
+      { to: '/employees', label: 'Employees', icon: 'employees', roles: REVIEW_ROLES },
+      { to: '/admin/reports', label: 'Reports', icon: 'reports', roles: REVIEW_ROLES },
     ],
   },
   {
     label: 'Administration',
-    items: [{ to: '/admin/users', label: 'Users', roles: [ROLES.ADMIN] }],
+    items: [{ to: '/admin/users', label: 'Users', icon: 'admin', roles: [ROLES.ADMIN] }],
   },
 ]
 
