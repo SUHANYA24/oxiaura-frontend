@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-ink-50 font-body text-body text-ink-950;
+  }
+
+  /* Monochrome focus ring, applied globally so nothing can opt out silently. */
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-ink-950;
+  }
+
+  ::placeholder {
+    @apply text-ink-400;
+  }
+
+  ::selection {
+    @apply bg-ink-950 text-white;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- buttons */
+  .btn {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-control border border-transparent
+           px-4 text-body font-medium leading-none transition-colors duration-150 ease-out
+           disabled:pointer-events-none disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply bg-ink-950 text-white hover:bg-ink-800;
+  }
+
+  .btn-secondary {
+    @apply border-ink-200 bg-white text-ink-950 hover:bg-ink-100;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-ink-600 hover:bg-ink-100 hover:text-ink-950;
+  }
+
+  .btn-danger {
+    @apply border-state-danger bg-white text-state-danger hover:bg-state-danger-bg;
+  }
+
+  .btn-sm {
+    @apply h-[30px] px-3 text-[13px];
+  }
+
+  /* --------------------------------------------------------------- surfaces */
+  .card {
+    @apply rounded-card border border-ink-200 bg-white p-6;
+  }
+
+  /* ------------------------------------------------------------------ forms */
+  .form-label {
+    @apply mb-2 block font-body text-[13px] font-medium text-ink-800;
+  }
+
+  .form-input,
+  .form-select,
+  .form-textarea {
+    @apply block w-full rounded-control border border-ink-200 bg-white px-3 text-body text-ink-950
+           transition-colors duration-150 ease-out
+           hover:border-ink-300
+           focus:border-ink-950
+           disabled:bg-ink-100 disabled:text-ink-400;
+  }
+
+  .form-input,
+  .form-select {
+    @apply h-9;
+  }
+
+  .form-textarea {
+    @apply min-h-[88px] py-2;
+  }
+
+  .form-select {
+    @apply cursor-pointer appearance-none bg-[length:16px] bg-[right_0.625rem_center] bg-no-repeat pr-9;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23525252' stroke-width='1.5'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  }
+
+  .form-input-error {
+    @apply border-state-danger hover:border-state-danger focus:border-state-danger;
+  }
+
+  .form-error {
+    @apply mt-1.5 block text-[13px] text-state-danger;
+  }
+
+  .form-hint {
+    @apply mt-1.5 block text-[13px] text-ink-400;
+  }
+
+  /* ----------------------------------------------------------------- badges */
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5
+           text-[12px] font-medium leading-5;
+  }
+
+  .badge-neutral {
+    @apply border-ink-200 bg-ink-100 text-ink-600;
+  }
+
+  .badge-ok {
+    @apply border-state-ok-border bg-state-ok-bg text-state-ok;
+  }
+
+  .badge-warn {
+    @apply border-state-warn-border bg-state-warn-bg text-state-warn;
+  }
+
+  .badge-danger {
+    @apply border-state-danger-border bg-state-danger-bg text-state-danger;
+  }
+
+  .badge-info {
+    @apply border-state-info-border bg-state-info-bg text-state-info;
+  }
+
+  /* ----------------------------------------------------------------- tables */
+  .data-table {
+    @apply w-full border-collapse text-left text-body;
+  }
+
+  .data-table thead th {
+    @apply border-b border-ink-200 px-4 py-3 font-mono text-meta uppercase text-ink-400;
+  }
+
+  .data-table tbody td {
+    @apply border-b border-ink-200 px-4 py-3 text-ink-800;
+  }
+
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  .data-table tbody tr {
+    @apply transition-colors duration-150 ease-out hover:bg-ink-100;
+  }
+
+  /* --------------------------------------------------------------- typography */
+  .page-title {
+    @apply font-display text-title font-normal text-ink-950;
+  }
+
+  .section-heading {
+    @apply font-body text-section font-semibold text-ink-950;
+  }
+
+  .meta-label {
+    @apply font-mono text-meta uppercase text-ink-400;
+  }
+}
