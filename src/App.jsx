@@ -53,6 +53,10 @@ export default function App() {
             <Route index element={<CustomerList />} />
             <Route path="new" element={<CustomerForm />} />
             <Route path=":id" element={<CustomerDetail />} />
+            {/* Not in the spec's Section 4 table, which lists no edit route —
+                but the form serves create and edit from one component, so edit
+                needs an address. */}
+            <Route path=":id/edit" element={<CustomerForm />} />
           </Route>
 
           <Route path="documents">

@@ -1,11 +1,18 @@
 import { format, formatDistanceToNow, parseISO } from 'date-fns'
 
+/** Display formatting. Money is Sri Lankan rupees throughout. */
+
 /**
- * Display formatting. Money is Sri Lankan rupees throughout.
- *
- * NIC masking lands with the customer module, which is the first screen that
- * shows a full identity number.
+ * Masks all but the last four digits of an identity number. Used anywhere a NIC
+ * appears in a list or over someone's shoulder; the detail view shows it in
+ * full, because that is the screen you open deliberately.
  */
+export function maskNic(value) {
+  const nic = String(value ?? '').trim()
+  if (!nic) return '—'
+  if (nic.length <= 4) return nic
+  return `${'•'.repeat(nic.length - 4)}${nic.slice(-4)}`
+}
 
 const LKR = new Intl.NumberFormat('en-LK', {
   style: 'currency',

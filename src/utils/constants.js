@@ -124,6 +124,7 @@ export const ROUTE_TITLES = [
   ['/customers', 'Customers'],
   ['/customers/new', 'New customer'],
   ['/customers/:id', 'Customer'],
+  ['/customers/:id/edit', 'Edit customer'],
   ['/documents/upload', 'Upload document'],
   ['/documents/:id/fraud', 'Fraud report'],
   ['/agreements', 'Agreements'],
