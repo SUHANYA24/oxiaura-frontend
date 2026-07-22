@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import {
+  clearAuthError,
   login as loginThunk,
   logout as logoutThunk,
   selectAuthError,
@@ -40,12 +41,15 @@ export function useAuth() {
 
   const logout = useCallback(() => dispatch(logoutThunk()), [dispatch])
 
+  const clearError = useCallback(() => dispatch(clearAuthError()), [dispatch])
+
   return {
     user,
     role,
     isAuthenticated,
     login,
     logout,
+    clearError,
     error,
     fieldErrors,
     isSubmitting: status === 'loading',

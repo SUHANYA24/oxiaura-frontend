@@ -48,9 +48,9 @@ export function NoAccess({ role }) {
       <p className="meta-label">403 — Restricted</p>
       <h1 className="mt-3 font-display text-title text-ink-950">You do not have access</h1>
       <p className="mt-2 max-w-md text-body text-ink-600">
-        This area is limited to roles above{' '}
-        {ROLE_LABELS[role] ? <strong className="font-medium text-ink-800">{ROLE_LABELS[role]}</strong> : 'yours'}. If
-        you believe you should be able to see it, ask an administrator to review your permissions.
+        This area is not open to the{' '}
+        <strong className="font-medium text-ink-800">{ROLE_LABELS[role] ?? role}</strong> role. If you believe you
+        should be able to see it, ask an administrator to review your permissions.
       </p>
       <Button variant="secondary" className="mt-6" onClick={() => window.history.back()}>
         Go back
