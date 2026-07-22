@@ -1,74 +1,56 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
+import {
+  login as loginThunk,
+  logout as logoutThunk,
+  selectAuthError,
+  selectAuthFieldErrors,
+  selectAuthStatus,
+  selectIsAuthenticated,
+  selectIsBootstrapped,
+  selectRole,
+  selectUser,
+} from '@/store/authSlice'
 
 /**
- * TEMPORARY session source. Phase 3 replaces the internals of this hook with
- * `useSelector` against `authSlice` — the shape it returns is already the shape
- * the slice will expose, so the guards, layout, and pages that consume it do
- * not change when the store lands.
+ * The read/write surface for the session. Components use this rather than
+ * reaching into the slice, so the store shape stays free to change.
  *
- * Until then the session lives in localStorage and is written by the dev role
- * switcher on the login stub.
+ * `login` resolves to `{ ok }` so a form can decide what to do next without
+ * having to understand thunk actions — the error text is already in state.
  */
-
-const STORAGE_KEY = 'plantvest.auth'
-const AUTH_EVENT = 'plantvest:auth'
-
-const EMPTY = { user: null, accessToken: null }
-
-let cachedRaw
-let cachedValue = EMPTY
-
-function getSnapshot() {
-  const raw = localStorage.getItem(STORAGE_KEY)
-  if (raw === cachedRaw) return cachedValue
-
-  cachedRaw = raw
-  try {
-    cachedValue = raw ? JSON.parse(raw) : EMPTY
-  } catch {
-    cachedValue = EMPTY
-  }
-  return cachedValue
-}
-
-function subscribe(onChange) {
-  window.addEventListener(AUTH_EVENT, onChange)
-  window.addEventListener('storage', onChange) // other tabs
-  return () => {
-    window.removeEventListener(AUTH_EVENT, onChange)
-    window.removeEventListener('storage', onChange)
-  }
-}
-
-function commit(session) {
-  if (session) localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
-  else localStorage.removeItem(STORAGE_KEY)
-  window.dispatchEvent(new Event(AUTH_EVENT))
-}
-
-/** Stand-in for the `login` thunk. */
-export function setSession(user, accessToken = 'dev-token') {
-  commit({ user, accessToken })
-}
-
-/** Stand-in for the `logout` thunk. */
-export function clearSession() {
-  commit(null)
-}
-
 export function useAuth() {
-  const session = useSyncExternalStore(subscribe, getSnapshot, () => EMPTY)
+  const dispatch = useDispatch()
+
+  const user = useSelector(selectUser)
+  const role = useSelector(selectRole)
+  const isAuthenticated = useSelector(selectIsAuthenticated)
+  const status = useSelector(selectAuthStatus)
+  const error = useSelector(selectAuthError)
+  const fieldErrors = useSelector(selectAuthFieldErrors)
+  const bootstrapped = useSelector(selectIsBootstrapped)
+
+  const login = useCallback(
+    async (credentials) => {
+      const result = await dispatch(loginThunk(credentials))
+      return { ok: loginThunk.fulfilled.match(result) }
+    },
+    [dispatch],
+  )
+
+  const logout = useCallback(() => dispatch(logoutThunk()), [dispatch])
 
   return {
-    user: session.user,
-    role: session.user?.role ?? null,
-    accessToken: session.accessToken,
-    isAuthenticated: Boolean(session.user && session.accessToken),
-    // Phase 3 flips this while `fetchMe` rehydrates a persisted token; the
-    // guard already handles it so no route flashes a redirect on refresh.
-    isLoading: false,
-    login: setSession,
-    logout: clearSession,
+    user,
+    role,
+    isAuthenticated,
+    login,
+    logout,
+    error,
+    fieldErrors,
+    isSubmitting: status === 'loading',
+    // True only while a stored token is being exchanged for a user on load.
+    isLoading: !bootstrapped,
   }
 }
 

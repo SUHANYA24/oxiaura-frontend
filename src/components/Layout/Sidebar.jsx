@@ -49,10 +49,10 @@ export default function Sidebar({ onNavigate }) {
 
       {user && (
         <div className="shrink-0 border-t border-ink-200 px-6 py-4">
-          <p className="truncate text-body font-medium text-ink-950">{user.name}</p>
+          <p className="truncate text-body font-medium text-ink-950">{user.full_name}</p>
+          {/* Phase 5 resolves branch_id to a branch name for this chip. */}
           <p className="mt-0.5 truncate font-mono text-meta uppercase text-ink-400">
             {ROLE_LABELS[role] ?? role}
-            {user.branch ? ` · ${user.branch}` : ''}
           </p>
           <button
             type="button"

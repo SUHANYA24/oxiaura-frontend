@@ -59,6 +59,60 @@ export function navForRole(role) {
   })).filter((section) => section.items.length > 0)
 }
 
+/* ---------------------------------------------------------------- statuses */
+
+/**
+ * Mirrors the backend enums. The `variant` on each entry is the Badge variant
+ * from the design system, so status colour is decided once here rather than
+ * re-derived in every table and detail panel.
+ */
+export const CUSTOMER_STATUS = {
+  pending: { label: 'Pending', variant: 'warn' },
+  verified: { label: 'Verified', variant: 'ok' },
+  flagged: { label: 'Flagged', variant: 'danger' },
+}
+
+export const AGREEMENT_STATUS = {
+  pending: { label: 'Pending', variant: 'warn' },
+  active: { label: 'Active', variant: 'ok' },
+  cancelled: { label: 'Cancelled', variant: 'neutral' },
+}
+
+export const VERIFICATION_STATUS = {
+  pending: { label: 'Pending', variant: 'warn' },
+  verified: { label: 'Verified', variant: 'ok' },
+  rejected: { label: 'Rejected', variant: 'danger' },
+}
+
+export const PROPOSAL_STAGES = [
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'rep_review', label: 'Rep review' },
+  { value: 'ho_review', label: 'Head office review' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'rejected', label: 'Rejected' },
+]
+
+export const DOC_TYPES = [
+  { value: 'nic', label: 'NIC' },
+  { value: 'bank_slip', label: 'Bank slip' },
+  { value: 'bank_book', label: 'Bank book' },
+  { value: 'proposal_form', label: 'Proposal form' },
+]
+
+/**
+ * Fraud severity bands from the design system. One definition, so a score never
+ * reads as "Review" on one screen and "Flagged" on another.
+ */
+export const FRAUD_BANDS = [
+  { max: 39, verdict: 'Safe', variant: 'ok' },
+  { max: 69, verdict: 'Review', variant: 'warn' },
+  { max: 100, verdict: 'Flagged', variant: 'danger' },
+]
+
+export function fraudVerdict(score) {
+  return FRAUD_BANDS.find((band) => score <= band.max) ?? FRAUD_BANDS[FRAUD_BANDS.length - 1]
+}
+
 /* ------------------------------------------------------------ page titles */
 
 /**

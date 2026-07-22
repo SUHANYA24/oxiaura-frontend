@@ -1,35 +1,32 @@
+import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
-import { Button, Card } from '@/components/ui'
+import { Button, Card, Input } from '@/components/ui'
 import { useAuth } from '@/hooks/useAuth'
-import { ROLE_LABELS, ROLES } from '@/utils/constants'
 
 /**
- * STUB. Phase 4 replaces the body of this card with the real form — email and
- * password with inline validation, show/hide, loading state on submit, and a
- * state.danger error banner for bad credentials.
+ * PHASE 3 TEST HARNESS — deliberately plain.
  *
- * Until the auth API is wired, the role switcher below stands in for it so the
- * route table and its guards can actually be walked.
+ * This exists to prove the store and API layer work end to end: submit, the
+ * user and tokens land in the store, a refresh keeps the session, sign out
+ * clears it. Phase 4 replaces the body of this card with the real form —
+ * inline validation, show/hide password, and a state.danger error banner.
  */
-const DEV_USERS = [
-  { name: 'Anoma Perera', email: 'admin@plantvest.lk', role: ROLES.ADMIN, branch: 'Head Office' },
-  { name: 'Ruwan Silva', email: 'ho@plantvest.lk', role: ROLES.HEAD_OFFICE, branch: 'Head Office' },
-  { name: 'Dilani Fernando', email: 'rep@plantvest.lk', role: ROLES.SALES_REP, branch: 'Kandy' },
-]
-
 export default function Login() {
-  const { isAuthenticated, login } = useAuth()
+  const { isAuthenticated, login, logout, user, error, fieldErrors, isSubmitting } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  // Where the guard bounced them from, or the dashboard.
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+
   const from = location.state?.from?.pathname ?? '/'
 
   if (isAuthenticated) return <Navigate to={from} replace />
 
-  const signIn = (user) => {
-    login(user)
-    navigate(from, { replace: true })
+  const onSubmit = async (event) => {
+    event.preventDefault()
+    const { ok } = await login({ email, password })
+    if (ok) navigate(from, { replace: true })
   }
 
   return (
@@ -41,22 +38,53 @@ export default function Login() {
         </div>
 
         <Card>
-          <p className="meta-label">Development sign-in</p>
-          <p className="mt-3 text-body text-ink-600">
-            The credential form lands in <span className="font-mono text-[13px] text-ink-950">Phase 4</span>. Pick a
-            role to walk the app with that role&rsquo;s access.
-          </p>
+          <form onSubmit={onSubmit} noValidate>
+            <Input
+              label="Email"
+              type="email"
+              name="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              error={fieldErrors?.email}
+            />
 
-          <div className="mt-6 space-y-2">
-            {DEV_USERS.map((user) => (
-              <Button key={user.role} variant="secondary" fullWidth onClick={() => signIn(user)}>
-                <span className="flex w-full items-baseline justify-between gap-3">
-                  <span>{user.name}</span>
-                  <span className="font-mono text-meta uppercase text-ink-400">{ROLE_LABELS[user.role]}</span>
-                </span>
-              </Button>
-            ))}
-          </div>
+            <div className="mt-4">
+              <Input
+                label="Password"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                error={fieldErrors?.password}
+              />
+            </div>
+
+            {error && (
+              <p className="mt-4 rounded-control border border-state-danger-border bg-state-danger-bg px-3 py-2 text-[13px] text-state-danger">
+                {error}
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              variant="primary"
+              fullWidth
+              className="mt-6"
+              loading={isSubmitting}
+              disabled={!email || !password}
+            >
+              Sign in
+            </Button>
+          </form>
+
+          {/* Phase 3 only: proves logout clears a session without needing the shell. */}
+          {user && (
+            <button type="button" onClick={logout} className="mt-4 text-[13px] text-ink-600 hover:text-ink-950">
+              Sign out
+            </button>
+          )}
         </Card>
       </div>
     </div>
