@@ -10,3 +10,6 @@ dist-ssr
 
 FRONTEND_SPEC.md
 .claude/
+graphify-out/
+API.md
+CLAUDE.md
