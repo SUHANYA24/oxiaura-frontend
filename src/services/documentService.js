@@ -55,8 +55,13 @@ const OCR_TEMPLATES = {
   },
 }
 
-// Fake but well-shaped fraud sub-scores keyed by doc id (stable per document).
-const FRAUD_TEMPLATE = {
+// Fake but well-shaped fraud profiles. The three sub-scores sit on their own
+// scales — ELA is an error-level metric, CNN a 0–1 forgery probability, Siamese
+// a 0–1 duplicate similarity — and aggregate_score is the weighted 0–100 the
+// verdict bands in constants.js read. `clear` is what a fresh upload gets;
+// `flagged` is seeded so the fraud report always has a high-severity document to
+// open, matching Phase 9's acceptance check.
+const FRAUD_CLEAR = {
   ela_score: 3.14,
   cnn_fraud_score: 0.2973,
   siamese_similarity: 0.1402,
@@ -65,6 +70,19 @@ const FRAUD_TEMPLATE = {
   flag_reason: null,
   verdict: 'clear',
 }
+
+const FRAUD_FLAGGED = {
+  ela_score: 41.6,
+  cnn_fraud_score: 0.8734,
+  siamese_similarity: 0.9142,
+  aggregate_score: 86.3,
+  is_flagged: true,
+  flag_reason:
+    'High visual similarity to a document already on file, combined with an elevated CNN manipulation probability.',
+  verdict: 'fraud',
+}
+
+const FRAUD_TEMPLATE = FRAUD_CLEAR // default for a fresh upload
 
 const store = new Map() // id -> document record (metadata + ocr + fraud)
 const taskIndex = new Map() // task_id -> id
@@ -94,9 +112,28 @@ function metaOf(record) {
   return { id, customer_id, doc_type, sha256_hash, ocr_confidence, verification_status, uploaded_at }
 }
 
+// A duplicate hit points at another stored document. Built at seed time so the
+// matched record already exists when we look it up. `duplicate_match` is a mock
+// enrichment — the /fraud-report shape in API.md carries no such field yet, so
+// when the fraud backend lands this either arrives on the report or is dropped
+// here; the UI renders the duplicate panel only when it is present.
+function duplicateSummary(matchedId, similarity) {
+  const match = store.get(matchedId)
+  if (!match) return null
+  return {
+    document_id: matchedId,
+    customer_id: match.customer_id,
+    doc_type: match.doc_type,
+    file_name: match.file_name,
+    similarity,
+    uploaded_at: match.uploaded_at,
+  }
+}
+
 // A couple of already-processed uploads so the recent-uploads card is not empty
-// on a cold load.
-function seed(id, customerId, docType, status, minutesAgo) {
+// on a cold load. `fraud`/`duplicateOf` let a seed carry a flagged verdict with
+// a matched document.
+function seed(id, customerId, docType, status, minutesAgo, { fraud = FRAUD_CLEAR, duplicateOf = null } = {}) {
   const fields = cloneFields(docType)
   const uploaded = new Date(Date.now() - minutesAgo * 60_000).toISOString()
   store.set(id, {
@@ -110,11 +147,18 @@ function seed(id, customerId, docType, status, minutesAgo) {
     uploaded_at: uploaded,
     startedAt: 0, // long finished
     fields,
-    fraud: { ...FRAUD_TEMPLATE, document_id: id, checked_at: uploaded },
+    fraud: {
+      ...fraud,
+      document_id: id,
+      duplicate_match: duplicateOf ? duplicateSummary(duplicateOf, fraud.siamese_similarity) : null,
+      checked_at: uploaded,
+    },
   })
 }
 seed(101, 1, 'nic', 'verified', 42)
 seed(102, 1, 'bank_slip', 'pending', 12)
+// A flagged upload whose slip duplicates document 102 — the fraud report's demo.
+seed(103, 1, 'bank_slip', 'pending', 4, { fraud: FRAUD_FLAGGED, duplicateOf: 102 })
 
 /* -------------------------------------------------------------- operations */
 
@@ -157,7 +201,7 @@ async function upload({ customerId, docType, file }, { onProgress } = {}) {
     uploaded_at: new Date().toISOString(),
     startedAt: Date.now(),
     fields,
-    fraud: { ...FRAUD_TEMPLATE, document_id: id, checked_at: null },
+    fraud: { ...FRAUD_TEMPLATE, document_id: id, duplicate_match: null, checked_at: null },
   })
   taskIndex.set(taskId, id)
 
@@ -289,6 +333,61 @@ async function verify(id, { decision, reason } = {}) {
 }
 
 /**
+ * Download a fraud report. API.md exposes no report-download endpoint yet, so
+ * the mock assembles a plain-text summary client-side; the real branch would
+ * stream a server-rendered PDF. Returns { blob, filename } for the caller to
+ * turn into an object URL and save.
+ */
+async function downloadReport(id) {
+  if (!USING_MOCK_DOCUMENTS) {
+    const { data } = await api.get(`/documents/${id}/fraud-report/download`, {
+      responseType: 'blob',
+    })
+    return { blob: data, filename: `fraud-report-${id}.pdf` }
+  }
+  const record = store.get(Number(id))
+  if (!record) throw { message: 'Document not found.', fieldErrors: {}, status: 404 }
+  const f = record.fraud
+  const lines = [
+    'PlantVest AI — Fraud analysis report',
+    '=====================================',
+    '',
+    `Document ID        : ${record.id}`,
+    `Document type      : ${record.doc_type}`,
+    `Customer ID        : ${record.customer_id}`,
+    `SHA-256            : ${record.sha256_hash}`,
+    `Uploaded at        : ${record.uploaded_at}`,
+    `Verification       : ${record.verification_status}`,
+    '',
+    'Sub-scores',
+    '----------',
+    `ELA score          : ${f.ela_score}`,
+    `CNN fraud score    : ${f.cnn_fraud_score}`,
+    `Siamese similarity : ${f.siamese_similarity}`,
+    '',
+    `Aggregate score    : ${f.aggregate_score} / 100`,
+    `Verdict            : ${f.verdict}`,
+    `Flagged            : ${f.is_flagged ? 'yes' : 'no'}`,
+    `Flag reason        : ${f.flag_reason ?? '—'}`,
+    ...(f.duplicate_match
+      ? [
+          '',
+          'Duplicate match',
+          '---------------',
+          `Matched document   : ${f.duplicate_match.document_id}`,
+          `Similarity         : ${(f.duplicate_match.similarity * 100).toFixed(1)}%`,
+        ]
+      : []),
+    '',
+    `Generated at       : ${new Date().toISOString()}`,
+    '',
+  ]
+  await delay(300)
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+  return { blob, filename: `fraud-report-${record.id}.txt` }
+}
+
+/**
  * Recent uploads for the sidebar list. API.md exposes no global document list
  * (documents are nested under a customer), so this is a mock/session view —
  * newest first.
@@ -300,4 +399,4 @@ async function recent() {
     .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))
 }
 
-export default { upload, job, get, ocrResult, fraudReport, saveCorrections, verify, recent }
+export default { upload, job, get, ocrResult, fraudReport, saveCorrections, verify, downloadReport, recent }
