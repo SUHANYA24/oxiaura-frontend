@@ -92,6 +92,68 @@ export const PROPOSAL_STAGES = [
   { value: 'rejected', label: 'Rejected' },
 ]
 
+/** Badge variant per workflow state. In-flight stages read as pending. */
+export const PROPOSAL_STATUS = {
+  submitted: { label: 'Submitted', variant: 'warn' },
+  rep_review: { label: 'Rep review', variant: 'warn' },
+  ho_review: { label: 'Head office review', variant: 'warn' },
+  approved: { label: 'Approved', variant: 'ok' },
+  rejected: { label: 'Rejected', variant: 'danger' },
+}
+
+/**
+ * The five stepper nodes from Phase 11: the four linear workflow states plus the
+ * agreement that follows approval. `rejected` is deliberately not a node — it is
+ * an exit from whichever stage the proposal was sitting in, so the stepper marks
+ * that node as the stopping point rather than adding a sixth column.
+ *
+ * `agreement` is not a backend workflow_status; it is complete once the proposal
+ * carries an `agreement_id`.
+ */
+export const PROPOSAL_FLOW = [
+  { key: 'submitted', label: 'Submitted' },
+  { key: 'rep_review', label: 'Rep review' },
+  { key: 'ho_review', label: 'HO review' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'agreement', label: 'Agreement' },
+]
+
+/**
+ * Who may perform each transition, mirroring the state machine in API.md.
+ * Terminal states (`approved`, `rejected`) have no entry — the API answers a
+ * further advance with 422. `admin` may perform any transition.
+ *
+ * The page reads this to decide which action buttons exist and the mock service
+ * reads it to answer a forbidden transition with 403, so the UI gate and the
+ * server rule can never drift apart.
+ */
+export const PROPOSAL_TRANSITIONS = {
+  submitted: {
+    to: 'rep_review',
+    label: 'Send to rep review',
+    roles: [ROLES.SALES_REP, ROLES.ADMIN],
+    waitingOn: 'the assigned sales rep',
+  },
+  rep_review: {
+    to: 'ho_review',
+    label: 'Send to head office',
+    roles: [ROLES.SALES_REP, ROLES.ADMIN],
+    waitingOn: 'the assigned sales rep',
+  },
+  ho_review: {
+    decision: true, // approve / reject, and `decision` is required on the request
+    label: 'Approve',
+    roles: [ROLES.HEAD_OFFICE, ROLES.ADMIN],
+    waitingOn: 'head office',
+  },
+}
+
+/** True when this role may advance a proposal sitting in this stage. */
+export function canAdvanceProposal(status, role) {
+  const transition = PROPOSAL_TRANSITIONS[status]
+  return Boolean(transition && role && transition.roles.includes(role))
+}
+
 export const DOC_TYPES = [
   { value: 'nic', label: 'NIC' },
   { value: 'bank_slip', label: 'Bank slip' },
