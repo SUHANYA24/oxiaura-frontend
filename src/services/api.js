@@ -40,10 +40,22 @@ api.interceptors.request.use((config) => {
  * Shared across concurrent 401s. Without this, five in-flight requests failing
  * at once would fire five refreshes and four of them would race to write a
  * token that the fifth has already replaced.
+ *
+ * The proactive refresh in `useSessionExpiry` goes through the same promise, so
+ * a scheduled refresh and a 401-triggered one can never both be in flight.
  */
 let refreshPromise = null
 
-function refreshAccessToken() {
+/**
+ * Exchanges the refresh token for a new access token and persists it.
+ *
+ * Resolves with the new access token; rejects with the raw axios error. It
+ * deliberately does *not* tear the session down on failure — the response
+ * interceptor does that when a real request has actually been refused, while the
+ * session watcher would rather warn the user and let them retry. Both callers
+ * want the same request, not the same consequence.
+ */
+export function refreshAccessToken() {
   if (refreshPromise) return refreshPromise
 
   const refreshToken = getRefreshToken()

@@ -5,13 +5,22 @@ import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import store from './store'
 import App from './App'
+import RouteErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <Provider store={store}>
       <BrowserRouter>
-        <App />
+        {/*
+          Inside the router so the boundary can reset itself on navigation, but
+          outside <Routes> so a throw in the route table itself is still caught.
+          The Toaster stays outside it: if a page crashes, the toast that
+          explained why should survive the fallback.
+        */}
+        <RouteErrorBoundary>
+          <App />
+        </RouteErrorBoundary>
         <Toaster
           position="top-right"
           toastOptions={{

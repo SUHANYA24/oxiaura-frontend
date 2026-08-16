@@ -24,6 +24,23 @@
   ::selection {
     @apply bg-ink-950 text-white;
   }
+
+  /**
+   * Motion is restrained to begin with — 150ms colour transitions and one page
+   * fade — but "restrained" is not "wanted by everyone". Honour the OS setting
+   * rather than deciding on the user's behalf. 0.01ms rather than 0 so
+   * transitionend/animationend listeners still fire.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
@@ -97,7 +114,7 @@
   }
 
   .form-hint {
-    @apply mt-1.5 block text-[13px] text-ink-400;
+    @apply mt-1.5 block text-[13px] text-ink-600;
   }
 
   /* ----------------------------------------------------------------- badges */
@@ -132,7 +149,7 @@
   }
 
   .data-table thead th {
-    @apply border-b border-ink-200 px-4 py-3 font-mono text-meta uppercase text-ink-400;
+    @apply border-b border-ink-200 px-4 py-3 font-mono text-meta uppercase text-ink-600;
   }
 
   .data-table tbody td {
@@ -156,7 +173,31 @@
     @apply font-body text-section font-semibold text-ink-950;
   }
 
+  /**
+   * ink.400 is the spec's colour for "muted meta", but at 11px it measures
+   * 2.52:1 on white — well under 4.5:1, and these labels are the only thing
+   * naming the value beside them. Moved to ink.600 (7.81:1). The token itself is
+   * untouched and still correct for placeholders, disabled text and chart axes,
+   * where the text is either duplicated by a label or exempt.
+   *
+   * Tracking and the mono face still separate a label from body copy, so the
+   * hierarchy survives the darker value.
+   */
   .meta-label {
-    @apply font-mono text-meta uppercase text-ink-400;
+    @apply font-mono text-meta uppercase text-ink-600;
+  }
+
+  /**
+   * First thing in the tab order on every authenticated page, visible only once
+   * focused. Without it, reaching the page content by keyboard means tabbing
+   * past the entire sidebar on every navigation.
+   */
+  .skip-link {
+    @apply sr-only;
+  }
+
+  .skip-link:focus {
+    @apply not-sr-only fixed left-4 top-4 z-[60] inline-flex h-9 items-center rounded-control
+           border border-ink-950 bg-white px-4 text-body font-medium text-ink-950 shadow-float;
   }
 }

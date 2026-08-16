@@ -17,10 +17,20 @@ export default {
         state: {
           // Semantic accents — the only colour permitted in the system.
           // `-bg` is the accent at ~8% over white, `-border` at ~25%.
+          //
+          // Every accent clears 4.5:1 against its own `-bg` tint, against white
+          // and against ink.50, because a badge sits on all three. Measured:
+          //   danger 5.36 / 6.05 / 5.79   warn 4.79 / 5.30 / 5.08
+          //   ok     5.64 / 6.33 / 6.06   info 6.22 / 7.00 / 6.71
+          // Re-measure before changing any of these six values.
           danger: '#B4342F',
           'danger-bg': '#F9EFEE',
           'danger-border': '#ECCCCB',
-          warn: '#9A6B12',
+          // Was #9A6B12, which came to 4.23:1 on warn-bg — the one accent in the
+          // system that failed. Darkened just far enough to clear 4.5:1 on the
+          // tint; the hue is unchanged, so a warn badge still reads as the same
+          // ochre it always did.
+          warn: '#8F6311',
           'warn-bg': '#F7F3EC',
           'warn-border': '#E6DAC4',
           ok: '#2F6B48',

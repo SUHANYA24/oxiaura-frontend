@@ -57,7 +57,10 @@ export default function Sidebar({ onNavigate, forceExpanded = false }) {
         )}
       </div>
 
-      <nav className={cn('flex-1 overflow-y-auto py-6', collapsed ? 'px-2' : 'px-3')}>
+      <nav
+        aria-label="Main navigation"
+        className={cn('flex-1 overflow-y-auto py-6', collapsed ? 'px-2' : 'px-3')}
+      >
         {sections.map((section, index) => (
           <div key={section.label} className="mb-6 last:mb-0">
             {collapsed ? (

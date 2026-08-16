@@ -10,6 +10,7 @@ import {
 } from '@/store/uiSlice'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
+import SessionExpiryDialog from '@/components/SessionExpiryDialog'
 
 /**
  * The persistent shell every authenticated page lives in.
@@ -39,6 +40,15 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-ink-50">
+      {/*
+        First stop in the tab order, invisible until focused. Without it, a
+        keyboard user pays for the whole sidebar — a dozen-odd links — on every
+        single navigation before reaching the page they asked for.
+      */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+
       <aside
         className={cn(
           'fixed inset-y-0 left-0 hidden transition-[width] duration-150 ease-out lg:block',
@@ -68,10 +78,22 @@ export default function AppLayout() {
         )}
       >
         <Navbar onOpenSidebar={() => dispatch(openSidebarDrawer())} />
-        <main className="flex-1 px-6 py-8">
+        {/*
+          tabIndex -1 so the skip link actually moves focus here rather than only
+          scrolling; a non-focusable target leaves the next Tab back at the top of
+          the sidebar in several browsers.
+        */}
+        <main id="main-content" tabIndex={-1} className="flex-1 px-6 py-8 focus:outline-none">
           <Outlet />
         </main>
       </div>
+
+      {/*
+        Mounted here rather than at the root: an unauthenticated visitor has no
+        session to expire, and the watcher's timer has nothing to schedule
+        against on /login or /verify/:token.
+      */}
+      <SessionExpiryDialog />
     </div>
   )
 }

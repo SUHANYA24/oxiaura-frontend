@@ -78,7 +78,9 @@ export default function Login() {
     fieldErrors?.[field] ?? (touched[field] ? clientErrors[field] : null)
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink-50 px-6 py-12">
+    // A <main> because this page is rendered outside AppLayout, so there is no
+    // other landmark for a screen reader to jump to.
+    <main className="flex min-h-screen items-center justify-center bg-ink-50 px-6 py-12">
       <div className="w-full max-w-sm animate-page-enter">
         <div className="mb-8 text-center">
           <h1 className="font-display text-[32px] leading-none text-ink-950">Plantvest</h1>
@@ -144,6 +146,6 @@ export default function Login() {
           </form>
         </Card>
       </div>
-    </div>
+    </main>
   )
 }

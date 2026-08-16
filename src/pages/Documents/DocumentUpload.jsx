@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import toast from 'react-hot-toast'
-import { Badge, Button, Card, EmptyState, Select, Spinner } from '@/components/ui'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Select,
+  Skeleton,
+  Spinner,
+} from '@/components/ui'
 import DocumentCard from '@/components/DocumentCard'
 import useAuth from '@/hooks/useAuth'
 import usePolling from '@/hooks/usePolling'
@@ -61,6 +70,10 @@ export default function DocumentUpload() {
   const [phase, setPhase] = useState('form')
 
   const [customers, setCustomers] = useState([])
+  // loading | ready | error. A failed customer list used to leave the Select
+  // sitting on "Loading customers…" forever, which is the exact unexplained
+  // blank area Phase 14 is meant to eliminate.
+  const [customersStatus, setCustomersStatus] = useState('loading')
   const [customerId, setCustomerId] = useState('')
   const [docType, setDocType] = useState('')
 
@@ -75,18 +88,42 @@ export default function DocumentUpload() {
   const [fraud, setFraud] = useState(null)
   const [edits, setEdits] = useState({})
   const [saving, setSaving] = useState(false)
+  // Set when the pipeline finished but its results would not load. Distinct from
+  // `polling.error`: the analysis succeeded, only the fetch of it failed, so the
+  // recovery is a retry rather than a re-upload.
+  const [resultsError, setResultsError] = useState(null)
 
   const [recent, setRecent] = useState([])
+  const [recentStatus, setRecentStatus] = useState('loading')
 
   /* --------------------------------------------------------- data loading */
 
-  useEffect(() => {
-    customerService
-      .list({ perPage: 100 })
-      .then(({ items }) => setCustomers(items))
-      .catch(() => setCustomers([]))
-    documentService.recent().then(setRecent).catch(() => {})
+  const loadCustomers = useCallback(async () => {
+    setCustomersStatus('loading')
+    try {
+      const { items } = await customerService.list({ perPage: 100 })
+      setCustomers(items)
+      setCustomersStatus('ready')
+    } catch {
+      setCustomers([])
+      setCustomersStatus('error')
+    }
   }, [])
+
+  const loadRecent = useCallback(async () => {
+    setRecentStatus('loading')
+    try {
+      setRecent(await documentService.recent())
+      setRecentStatus('ready')
+    } catch {
+      setRecentStatus('error')
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCustomers()
+    loadRecent()
+  }, [loadCustomers, loadRecent])
 
   useEffect(() => () => previewUrl && URL.revokeObjectURL(previewUrl), [previewUrl])
 
@@ -132,28 +169,38 @@ export default function DocumentUpload() {
   })
 
   // When the pipeline finishes, pull the OCR fields and fraud verdict together.
-  useEffect(() => {
-    if (polling.status !== 'success' || !doc) return undefined
-    let active = true
-    ;(async () => {
-      try {
-        const [ocrData, fraudData] = await Promise.all([
-          documentService.ocrResult(doc.id),
-          documentService.fraudReport(doc.id),
-        ])
-        if (!active) return
-        setOcr(ocrData)
-        setFraud(fraudData)
-        setPhase('complete')
-        documentService.recent().then(setRecent).catch(() => {})
-      } catch (error) {
-        if (active) toast.error(error?.message ?? 'Could not load the results.')
-      }
-    })()
-    return () => {
-      active = false
+  // Keyed on the document id rather than a boolean flag so a resolve that arrives
+  // after the user has moved on to another upload is discarded, not applied.
+  const resultsForRef = useRef(null)
+
+  const loadResults = useCallback(async () => {
+    if (!doc) return
+    const requestedFor = doc.id
+    resultsForRef.current = requestedFor
+    setResultsError(null)
+    try {
+      const [ocrData, fraudData] = await Promise.all([
+        documentService.ocrResult(doc.id),
+        documentService.fraudReport(doc.id),
+      ])
+      if (resultsForRef.current !== requestedFor) return
+      setOcr(ocrData)
+      setFraud(fraudData)
+      setPhase('complete')
+      loadRecent()
+    } catch (error) {
+      if (resultsForRef.current !== requestedFor) return
+      // A toast alone left `phase` on 'processing' with a pipeline that had
+      // visibly finished and no way forward. The message is kept on the page,
+      // next to the retry that acts on it.
+      setResultsError(error?.message ?? 'The analysis finished, but its results could not be loaded.')
     }
-  }, [polling.status, doc])
+  }, [doc, loadRecent])
+
+  useEffect(() => {
+    if (polling.status !== 'success') return
+    loadResults()
+  }, [polling.status, loadResults])
 
   /* ------------------------------------------------------------- actions */
 
@@ -184,6 +231,8 @@ export default function DocumentUpload() {
     setOcr(null)
     setFraud(null)
     setEdits({})
+    setResultsError(null)
+    resultsForRef.current = null
     setUploadPct(0)
     setPhase('form')
   }
@@ -214,6 +263,20 @@ export default function DocumentUpload() {
     label: `${c.customer_code} — ${c.full_name}`,
   }))
 
+  /**
+   * Every state the Select can be in says which one it is. The old version
+   * inferred "loading" from an empty array, so a failed request and an empty
+   * customer book both read as "Loading customers…" indefinitely.
+   */
+  const customerPlaceholder =
+    customersStatus === 'loading'
+      ? 'Loading customers…'
+      : customersStatus === 'error'
+        ? 'Customer list unavailable'
+        : customerOptions.length
+          ? 'Select a customer'
+          : 'No customers registered yet'
+
   /* --------------------------------------------------------------- render */
 
   return (
@@ -237,15 +300,29 @@ export default function DocumentUpload() {
           {(phase === 'form' || phase === 'uploading') && (
             <Card>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Select
-                  label="Customer"
-                  required
-                  placeholder={customers.length ? 'Select a customer' : 'Loading customers…'}
-                  options={customerOptions}
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  disabled={phase !== 'form'}
-                />
+                <div>
+                  <Select
+                    label="Customer"
+                    required
+                    placeholder={customerPlaceholder}
+                    options={customerOptions}
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    disabled={phase !== 'form' || customersStatus !== 'ready'}
+                    error={
+                      customersStatus === 'error'
+                        ? 'The customer list could not be loaded.'
+                        : undefined
+                    }
+                  />
+                  {/* The retry sits outside the Select because Field shows either
+                      an error or a hint, never both. */}
+                  {customersStatus === 'error' && (
+                    <Button size="sm" variant="ghost" className="mt-1 px-0" onClick={loadCustomers}>
+                      Try again
+                    </Button>
+                  )}
+                </div>
                 <Select
                   label="Document type"
                   required
@@ -359,6 +436,22 @@ export default function DocumentUpload() {
                   {polling.error?.message ?? 'The pipeline reported an error.'}
                 </p>
               )}
+              {resultsError && (
+                <p className="mt-4 rounded-control border border-state-danger-border bg-state-danger-bg px-3 py-2 text-[13px] text-state-danger">
+                  {resultsError}
+                </p>
+              )}
+              {resultsError && (
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button variant="ghost" onClick={resetForNext}>
+                    Start over
+                  </Button>
+                  <Button variant="secondary" onClick={loadResults}>
+                    Try again
+                  </Button>
+                </div>
+              )}
+
               {(polling.status === 'timeout' || polling.status === 'error') && (
                 <div className="mt-4 flex justify-end">
                   <Button variant="secondary" onClick={resetForNext}>
@@ -438,7 +531,25 @@ export default function DocumentUpload() {
 
         <aside>
           <Card title="Recent uploads" padded={false}>
-            {recent.length ? (
+            {/*
+              Three states, kept apart. Previously a failed fetch fell through to
+              the empty state, so the panel confidently claimed the user had never
+              uploaded anything.
+            */}
+            {recentStatus === 'loading' ? (
+              <div className="space-y-2 p-3" role="status" aria-label="Loading recent uploads">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-[68px] w-full" rounded="rounded-card" />
+                ))}
+              </div>
+            ) : recentStatus === 'error' ? (
+              <ErrorState
+                title="Could not load recent uploads"
+                description="The list is unavailable right now. Uploading still works."
+                onRetry={loadRecent}
+                className="py-10"
+              />
+            ) : recent.length ? (
               <div className="space-y-2 p-3">
                 {recent.map((d) => (
                   <DocumentCard

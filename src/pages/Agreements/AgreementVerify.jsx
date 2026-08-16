@@ -78,7 +78,8 @@ export default function AgreementVerify() {
     : null
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink-50 px-6 py-12">
+    // Public page, rendered outside AppLayout — it owns the <main> landmark.
+    <main className="flex min-h-screen items-center justify-center bg-ink-50 px-6 py-12">
       <div className="w-full max-w-md animate-page-enter">
         <p className="mb-6 text-center font-display text-[28px] leading-none text-ink-950">Plantvest</p>
 
@@ -150,6 +151,6 @@ export default function AgreementVerify() {
           Scan any Plantvest agreement QR code to check its authenticity.
         </p>
       </div>
-    </div>
+    </main>
   )
 }

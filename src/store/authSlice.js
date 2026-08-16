@@ -58,6 +58,15 @@ const authSlice = createSlice({
       state.status = 'idle'
       state.bootstrapped = true
     },
+    /**
+     * A new access token arrived without a login — either the axios layer
+     * refreshed after a 401, or the session watcher refreshed ahead of expiry.
+     * Storage was already written by whoever fetched it; this only keeps the
+     * mirrored copy honest, so anything selecting on the token sees the live one.
+     */
+    sessionRefreshed(state, action) {
+      state.accessToken = action.payload
+    },
     clearAuthError(state) {
       state.error = null
       state.fieldErrors = {}
@@ -113,12 +122,13 @@ const authSlice = createSlice({
   },
 })
 
-export const { sessionExpired, clearAuthError } = authSlice.actions
+export const { sessionExpired, sessionRefreshed, clearAuthError } = authSlice.actions
 
 /* ---------------------------------------------------------------- selectors */
 
 export const selectUser = (state) => state.auth.user
 export const selectRole = (state) => state.auth.user?.role ?? null
+export const selectAccessToken = (state) => state.auth.accessToken
 export const selectIsAuthenticated = (state) => Boolean(state.auth.user && state.auth.accessToken)
 export const selectAuthStatus = (state) => state.auth.status
 export const selectAuthError = (state) => state.auth.error
