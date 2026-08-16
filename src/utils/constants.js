@@ -113,6 +113,24 @@ export function fraudVerdict(score) {
   return FRAUD_BANDS.find((band) => score <= band.max) ?? FRAUD_BANDS[FRAUD_BANDS.length - 1]
 }
 
+/**
+ * OCR per-field confidence bands. High reads as neutral — nothing to check;
+ * medium and low escalate the colour, and a low-confidence field is the one the
+ * upload screen turns into an editable input so staff can correct it. One
+ * definition, so a 0.71 never reads "Medium" on one panel and "Low" on another.
+ */
+export const CONFIDENCE_BANDS = [
+  { min: 0.9, label: 'High', variant: 'neutral' },
+  { min: 0.75, label: 'Medium', variant: 'warn' },
+  { min: 0, label: 'Low', variant: 'danger' },
+]
+
+export function confidenceBand(confidence) {
+  const value = Number(confidence)
+  const pct = Number.isFinite(value) ? value : 0
+  return CONFIDENCE_BANDS.find((band) => pct >= band.min) ?? CONFIDENCE_BANDS[CONFIDENCE_BANDS.length - 1]
+}
+
 /* ------------------------------------------------------------ page titles */
 
 /**
