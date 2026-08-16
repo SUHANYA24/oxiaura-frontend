@@ -63,3 +63,27 @@ export function formatRelative(value) {
   const date = toDate(value)
   return date ? `${formatDistanceToNow(date)} ago` : '—'
 }
+
+/**
+ * KPI periods arrive as a separate `month` (1–12) and `year`, not as a date, so
+ * these take the pair rather than a timestamp.
+ */
+export function formatMonthYear(month, year) {
+  if (!month || !year) return '—'
+  return format(new Date(Number(year), Number(month) - 1, 1), 'MMMM yyyy')
+}
+
+/** "Aug 26" — for a chart axis, where a twelve-month window can cross a year. */
+export function formatMonthShort(month, year) {
+  if (!month || !year) return '—'
+  return format(new Date(Number(year), Number(month) - 1, 1), 'MMM yy')
+}
+
+/**
+ * Achievement against a target. `null` means no target was set, which is not
+ * 0% — it is an absence, and it reads as an em dash everywhere.
+ */
+export function formatPercent(value, fractionDigits = 0) {
+  if (value == null || Number.isNaN(Number(value))) return '—'
+  return `${Number(value).toFixed(fractionDigits)}%`
+}

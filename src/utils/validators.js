@@ -46,3 +46,23 @@ export function optionalPhone(value) {
   if (!trimmed) return null
   return PHONE_PATTERN.test(trimmed) ? null : 'Enter a valid phone number, e.g. 0771234567.'
 }
+
+/**
+ * KPI targets. Zero is legitimate — it is how an admin says "no target this
+ * month" — so these guard the type and the sign, not the magnitude.
+ */
+export function nonNegativeInteger(value, label = 'This field') {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return `${label} is required.`
+  if (!/^\d+$/.test(trimmed)) return `${label} must be a whole number.`
+  return null
+}
+
+export function nonNegativeAmount(value, label = 'This field') {
+  const trimmed = String(value ?? '').trim()
+  if (!trimmed) return `${label} is required.`
+  const amount = Number(trimmed)
+  if (!Number.isFinite(amount)) return `${label} must be a number.`
+  if (amount < 0) return `${label} cannot be negative.`
+  return null
+}

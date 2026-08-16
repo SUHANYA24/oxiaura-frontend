@@ -193,6 +193,57 @@ export function confidenceBand(confidence) {
   return CONFIDENCE_BANDS.find((band) => pct >= band.min) ?? CONFIDENCE_BANDS[CONFIDENCE_BANDS.length - 1]
 }
 
+/* ------------------------------------------------------------------- KPIs */
+
+/**
+ * Achievement bands for the KPI ring. A ring stays ink.950 while an employee is
+ * on track, so a grid of rings reads as monochrome and only an underperformer
+ * carries colour — that is what makes them findable at a glance.
+ *
+ * Thresholds are on achievement percentage (actual ÷ target), which the backend
+ * already computes as `customer_achievement_pct` / `revenue_achievement_pct`.
+ */
+export const KPI_BANDS = [
+  { min: 80, label: 'On track', variant: 'neutral' },
+  { min: 50, label: 'Behind', variant: 'warn' },
+  { min: 0, label: 'At risk', variant: 'danger' },
+]
+
+/**
+ * No target set is not a performance state — the API answers `null` for the
+ * percentage when the target is 0, and rendering that as failure would blame an
+ * employee for an admin's omission. It reads neutral.
+ */
+export const KPI_NO_TARGET = { label: 'No target', variant: 'neutral', unset: true }
+
+export function kpiBand(pct) {
+  if (pct == null || Number.isNaN(Number(pct))) return KPI_NO_TARGET
+  const value = Number(pct)
+  return KPI_BANDS.find((band) => value >= band.min) ?? KPI_BANDS[KPI_BANDS.length - 1]
+}
+
+/* ----------------------------------------------------------------- periods */
+
+const MONTH_FORMAT = new Intl.DateTimeFormat('en', { month: 'long' })
+
+/** Month options for the KPI period selector. `value` is the API's 1–12 month. */
+export const MONTH_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
+  value: String(index + 1),
+  label: MONTH_FORMAT.format(new Date(2000, index, 1)),
+}))
+
+/**
+ * A window around the current year, wide enough to review last year's figures
+ * and set next year's targets. The API accepts 2000–2100; there is no value in
+ * offering a century of empty months in a select.
+ */
+export function yearOptions(reference = new Date().getFullYear()) {
+  return [reference - 2, reference - 1, reference, reference + 1].map((year) => ({
+    value: String(year),
+    label: String(year),
+  }))
+}
+
 /* ------------------------------------------------------------ page titles */
 
 /**
