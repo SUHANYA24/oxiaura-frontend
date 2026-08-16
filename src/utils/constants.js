@@ -22,6 +22,45 @@ export const ALL_ROLES = [ROLES.ADMIN, ROLES.HEAD_OFFICE, ROLES.SALES_REP]
 /** Admin + head office — the reviewing roles. */
 export const REVIEW_ROLES = [ROLES.ADMIN, ROLES.HEAD_OFFICE]
 
+/** Role as a form option. Order follows ALL_ROLES, so it reads most senior first. */
+export const ROLE_OPTIONS = ALL_ROLES.map((role) => ({ value: role, label: ROLE_LABELS[role] }))
+
+/* --------------------------------------------------------------- branches */
+
+/**
+ * Branch reference data.
+ *
+ * The contract has no `/branches` endpoint — a user carries a bare `branch_id`
+ * — so this is both the id → name lookup and the option list every branch
+ * selector and filter reads. The ids are the ones the employee and user mocks
+ * assign, so a filter can never offer a branch the data does not use.
+ *
+ * When the API grows a branches endpoint this becomes a fetch; callers already
+ * ask for `branchName(id)` rather than indexing the array, so nothing above
+ * this file changes.
+ */
+export const BRANCHES = [
+  { id: 1, name: 'Kandy Main' },
+  { id: 2, name: 'Galle' },
+  { id: 3, name: 'Colombo Head Office' },
+  { id: 4, name: 'Kurunegala' },
+]
+
+export const BRANCH_OPTIONS = BRANCHES.map((branch) => ({
+  value: String(branch.id),
+  label: branch.name,
+}))
+
+/**
+ * `branch_id` is nullable — head office accounts often have none — so an absent
+ * id is "Unassigned" rather than an error. An id with no matching branch still
+ * renders as itself: a stale reference should be visible, not swallowed.
+ */
+export function branchName(id) {
+  if (id == null || id === '') return 'Unassigned'
+  return BRANCHES.find((branch) => String(branch.id) === String(id))?.name ?? `Branch ${id}`
+}
+
 /* ------------------------------------------------------------- navigation */
 
 export const NAV_SECTIONS = [
@@ -82,6 +121,20 @@ export const VERIFICATION_STATUS = {
   pending: { label: 'Pending', variant: 'warn' },
   verified: { label: 'Verified', variant: 'ok' },
   rejected: { label: 'Rejected', variant: 'danger' },
+}
+
+/**
+ * A user account is active or it is not. Deactivation is an administrative
+ * decision rather than a failure, so it reads neutral — the same treatment a
+ * cancelled agreement gets. Nothing about a person's account is `danger`.
+ */
+export const USER_STATUS = {
+  active: { label: 'Active', variant: 'ok' },
+  inactive: { label: 'Inactive', variant: 'neutral' },
+}
+
+export function userStatus(isActive) {
+  return isActive ? USER_STATUS.active : USER_STATUS.inactive
 }
 
 export const PROPOSAL_STAGES = [
@@ -243,6 +296,61 @@ export function yearOptions(reference = new Date().getFullYear()) {
     label: String(year),
   }))
 }
+
+/* ---------------------------------------------------------------- reports */
+
+/**
+ * The report set the Reports screen can run.
+ *
+ * Each entry names the record type and the status vocabulary that applies to it,
+ * so the status filter re-populates when the report type changes instead of
+ * offering, say, "cancelled" against a document. `statuses` points at the maps
+ * above rather than restating them — a status colour is still decided once.
+ */
+export const REPORT_TYPES = [
+  {
+    value: 'customers',
+    label: 'Customer registrations',
+    noun: 'customer',
+    statuses: CUSTOMER_STATUS,
+  },
+  {
+    value: 'agreements',
+    label: 'Agreements issued',
+    noun: 'agreement',
+    statuses: AGREEMENT_STATUS,
+  },
+  {
+    value: 'proposals',
+    label: 'Proposals',
+    noun: 'proposal',
+    statuses: PROPOSAL_STATUS,
+  },
+  {
+    value: 'documents',
+    label: 'Document verifications',
+    noun: 'document',
+    statuses: VERIFICATION_STATUS,
+  },
+]
+
+export const REPORT_TYPE_OPTIONS = REPORT_TYPES.map(({ value, label }) => ({ value, label }))
+
+export function reportType(value) {
+  return REPORT_TYPES.find((type) => type.value === value) ?? REPORT_TYPES[0]
+}
+
+/** Status options for a report type, with "All" first — the unfiltered default. */
+export function statusOptionsFor(value) {
+  const { statuses } = reportType(value)
+  return [
+    { value: '', label: 'All statuses' },
+    ...Object.entries(statuses).map(([key, meta]) => ({ value: key, label: meta.label })),
+  ]
+}
+
+/** Shortest password the user form will submit; the server is the authority. */
+export const PASSWORD_MIN_LENGTH = 8
 
 /* ------------------------------------------------------------ page titles */
 

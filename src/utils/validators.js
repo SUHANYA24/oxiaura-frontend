@@ -66,3 +66,25 @@ export function nonNegativeAmount(value, label = 'This field') {
   if (amount < 0) return `${label} cannot be negative.`
   return null
 }
+
+/**
+ * A password an admin is setting for someone else. The server owns the real
+ * policy; this catches the too-short attempt before a round trip. Whitespace is
+ * not trimmed — a leading space is a legitimate character in a password.
+ */
+export function password(value, min = 8) {
+  const raw = String(value ?? '')
+  if (!raw) return 'Password is required.'
+  if (raw.length < min) return `Password must be at least ${min} characters.`
+  return null
+}
+
+/**
+ * A closed date range. Either end may be blank — an open range is valid — but a
+ * start after its end is not, and it is the kind of mistake that otherwise reads
+ * as "no records found".
+ */
+export function dateRange(from, to) {
+  if (!from || !to) return null
+  return from <= to ? null : 'The start date must fall on or before the end date.'
+}
