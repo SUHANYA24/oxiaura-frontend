@@ -5,7 +5,10 @@ import { Badge, Button, Card, ConfirmModal, ErrorState, Modal, Skeleton, Textare
 import FraudScoreBadge from '@/components/FraudScoreBadge'
 import FraudScoreBar from '@/components/FraudScoreBar'
 import { useAuth } from '@/hooks/useAuth'
-import documentService, { USING_MOCK_DOCUMENTS } from '@/services/documentService'
+import documentService, {
+  FRAUD_REPORT_IS_CLIENT_RENDERED,
+  USING_MOCK_DOCUMENTS,
+} from '@/services/documentService'
 import { DOC_TYPES, fraudVerdict, ROLES, VERIFICATION_STATUS } from '@/utils/constants'
 import { formatDateTime, formatRelative } from '@/utils/formatters'
 import { cn } from '@/utils/cn'
@@ -49,17 +52,26 @@ const PANEL_TINT = {
 }
 const VERDICT_TEXT = { ok: 'text-state-ok', warn: 'text-state-warn', danger: 'text-state-danger' }
 
-/** One sub-score: severity dot, stage name, score in the display serif, note. */
+/**
+ * One sub-score: severity dot, stage name, score in the display serif, note.
+ *
+ * Every sub-score is nullable in the report schema, so a stage that has no number
+ * reads as a dash on a neutral dot rather than a confident 0.00.
+ */
 function StageRow({ stage, value }) {
-  const variant = stage.severity(Number(value) || 0)
+  const missing = value == null || !Number.isFinite(Number(value))
+  const variant = missing ? null : stage.severity(Number(value))
   return (
     <div className="flex gap-3 border-b border-ink-200 py-4 last:border-b-0">
-      <span className={cn('mt-2 h-2 w-2 shrink-0 rounded-full', DOT[variant])} aria-hidden="true" />
+      <span
+        className={cn('mt-2 h-2 w-2 shrink-0 rounded-full', missing ? 'bg-ink-300' : DOT[variant])}
+        aria-hidden="true"
+      />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-4">
           <p className="text-body font-medium text-ink-950">{stage.label}</p>
           <span className="font-display text-[22px] leading-none tabular-nums text-ink-950">
-            {stage.format(value)}
+            {missing ? '—' : stage.format(value)}
           </span>
         </div>
         <p className="mt-1.5 text-[13px] leading-relaxed text-ink-600">{stage.explain}</p>
@@ -199,8 +211,17 @@ export default function FraudReport() {
   }
 
   const aggregate = Number(fraud.aggregate_score) || 0
-  const { variant } = fraudVerdict(aggregate)
+  const band = fraudVerdict(aggregate)
+  // The API decides the verdict — `is_flagged`, surfaced as `verdict: flagged | clear` —
+  // while the bands only pick the colour. FRAUD_BANDS turns danger at the same
+  // threshold the backend flags on, so the two agree; if a deployment moves that
+  // threshold, the API's word still wins here.
+  const flagged = fraud.is_flagged ?? fraud.verdict === 'flagged'
+  const variant = flagged ? 'danger' : band.variant
   const statusMeta = VERIFICATION_STATUS[doc.verification_status] ?? VERIFICATION_STATUS.pending
+  // A duplicate *pairing* is a mock-only enrichment: the live report carries the
+  // Siamese similarity but not the document it matched, so the card below appears
+  // only behind the mock and the stage row carries the signal otherwise.
   const duplicate = fraud.duplicate_match
   const decided = doc.verification_status !== 'pending'
 
@@ -224,8 +245,11 @@ export default function FraudReport() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+          {/* There is no /fraud-report/download endpoint, so the file is written in
+              the browser from the live figures — the label says summary, not report,
+              because that is what lands in the downloads folder. */}
           <Button variant="secondary" onClick={onDownload} loading={downloading}>
-            Download report
+            {FRAUD_REPORT_IS_CLIENT_RENDERED ? 'Download summary' : 'Download report'}
           </Button>
         </div>
       </header>
@@ -247,8 +271,11 @@ export default function FraudReport() {
             </span>
             <div>
               <div className="meta-label">Aggregate fraud score</div>
-              <div className="mt-1.5">
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <FraudScoreBadge score={Math.round(aggregate)} />
+                <span className="font-mono text-meta uppercase text-ink-400">
+                  Screening verdict: {fraud.verdict ?? (flagged ? 'flagged' : 'clear')}
+                </span>
               </div>
             </div>
           </div>
@@ -256,7 +283,7 @@ export default function FraudReport() {
             <FraudScoreBar score={Math.round(aggregate)} />
             <p className="mt-2 text-[13px] leading-relaxed text-ink-600">
               {fraud.flag_reason ??
-                (fraud.is_flagged
+                (flagged
                   ? 'This document was flagged for manual review.'
                   : 'No manipulation or duplication signals crossed the review threshold.')}
             </p>
@@ -274,7 +301,9 @@ export default function FraudReport() {
               </svg>
             </div>
             <p className="mt-3 text-center text-[13px] text-ink-400">
-              Preview unavailable in sample data
+              {USING_MOCK_DOCUMENTS
+                ? 'Preview unavailable in sample data'
+                : 'The API serves no file for an uploaded document, so there is no preview.'}
             </p>
             <dl className="mt-4 space-y-3 border-t border-ink-200 pt-4">
               <PreviewRow label="File">
@@ -300,6 +329,12 @@ export default function FraudReport() {
                 <StageRow key={stage.key} stage={stage} value={fraud[stage.key]} />
               ))}
             </div>
+            {FRAUD_REPORT_IS_CLIENT_RENDERED && (
+              <p className="mt-4 border-t border-ink-200 pt-4 text-[13px] leading-relaxed text-ink-600">
+                Download summary writes these figures to a text file in your browser. The API reports
+                the scores but serves no report document.
+              </p>
+            )}
           </Card>
 
           {duplicate && (

@@ -15,7 +15,11 @@ import {
   Textarea,
 } from '@/components/ui'
 import WorkflowStepper from '@/components/WorkflowStepper'
-import proposalService, { USING_MOCK_PROPOSALS } from '@/services/proposalService'
+import proposalService, {
+  SUPPORTS_PROPOSAL_NOTES,
+  SUPPORTS_REJECTION_REASON,
+  USING_MOCK_PROPOSALS,
+} from '@/services/proposalService'
 import customerService from '@/services/customerService'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -157,7 +161,9 @@ function NoteThread({ notes }) {
   if (!notes.length) {
     return (
       <p className="py-2 text-body text-ink-400">
-        No notes yet. Add one to record context for whoever reviews this next.
+        {SUPPORTS_PROPOSAL_NOTES
+          ? 'No notes yet. Add one to record context for whoever reviews this next.'
+          : 'No note was recorded when this proposal was submitted.'}
       </p>
     )
   }
@@ -404,27 +410,35 @@ function ProposalDetail({ proposalId, role, user, onUpdated }) {
           <NoteThread notes={proposal.notes} />
         </div>
 
-        <div className="mt-5 border-t border-ink-200 pt-4">
-          <Textarea
-            label="Add a note"
-            rows={3}
-            maxLength={500}
-            value={noteBody}
-            onChange={(e) => setNoteBody(e.target.value)}
-            placeholder="Context for whoever reviews this next…"
-          />
-          <div className="mt-1 flex justify-end">
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={savingNote}
-              disabled={!noteBody.trim()}
-              onClick={addNote}
-            >
-              Add note
-            </Button>
+        {SUPPORTS_PROPOSAL_NOTES ? (
+          <div className="mt-5 border-t border-ink-200 pt-4">
+            <Textarea
+              label="Add a note"
+              rows={3}
+              maxLength={500}
+              value={noteBody}
+              onChange={(e) => setNoteBody(e.target.value)}
+              placeholder="Context for whoever reviews this next…"
+            />
+            <div className="mt-1 flex justify-end">
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={savingNote}
+                disabled={!noteBody.trim()}
+                onClick={addNote}
+              >
+                Add note
+              </Button>
+            </div>
           </div>
-        </div>
+        ) : (
+          // No POST /proposals/{id}/notes: the note is written once, at
+          // submission. Saying so beats a composer that could only fail.
+          <p className="mt-5 border-t border-ink-200 pt-4 text-[13px] text-ink-600">
+            Notes are recorded when the proposal is submitted and cannot be added afterwards.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-3 border-t border-ink-200 bg-ink-50 px-6 py-4">
@@ -447,7 +461,9 @@ function ProposalDetail({ proposalId, role, user, onUpdated }) {
         title={decision === 'rejected' ? 'Reject proposal' : 'Approve proposal'}
         description={
           decision === 'rejected'
-            ? 'A reason is required and is recorded in the notes thread.'
+            ? SUPPORTS_REJECTION_REASON
+              ? 'A reason is required and is recorded in the notes thread.'
+              : 'Rejection is final. The proposal cannot be advanced again.'
             : 'Approving clears the proposal for agreement generation.'
         }
         size="sm"
@@ -467,8 +483,13 @@ function ProposalDetail({ proposalId, role, user, onUpdated }) {
               <Button
                 variant="danger"
                 loading={advancing}
-                disabled={!reason.trim()}
-                onClick={() => advance({ decision: 'rejected', reason: reason.trim() })}
+                disabled={SUPPORTS_REJECTION_REASON && !reason.trim()}
+                onClick={() =>
+                  advance({
+                    decision: 'rejected',
+                    ...(SUPPORTS_REJECTION_REASON ? { reason: reason.trim() } : {}),
+                  })
+                }
               >
                 Reject proposal
               </Button>
@@ -481,15 +502,24 @@ function ProposalDetail({ proposalId, role, user, onUpdated }) {
         }
       >
         {decision === 'rejected' ? (
-          <Textarea
-            label="Reason for rejection"
-            required
-            rows={4}
-            maxLength={500}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="What failed review, and what would need to change?"
-          />
+          SUPPORTS_REJECTION_REASON ? (
+            <Textarea
+              label="Reason for rejection"
+              required
+              rows={4}
+              maxLength={500}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="What failed review, and what would need to change?"
+            />
+          ) : (
+            // `PUT /advance` takes `decision` and rejects unknown fields, so a
+            // reason typed here could only be discarded. Not asking is honest.
+            <p className="text-body text-ink-600">
+              {proposal.customer?.full_name} · {formatCurrency(proposal.proposed_amount)}. The API records
+              the decision without a reason, so note anything the customer needs to be told separately.
+            </p>
+          )
         ) : (
           <p className="text-body text-ink-600">
             {proposal.customer?.full_name} · {formatCurrency(proposal.proposed_amount)}. This is the

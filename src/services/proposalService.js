@@ -1,4 +1,5 @@
 import api from './api'
+import { attachCustomers } from './customerLookup'
 import { PROPOSAL_TRANSITIONS, ROLES } from '@/utils/constants'
 
 /**
@@ -7,21 +8,34 @@ import { PROPOSAL_TRANSITIONS, ROLES } from '@/utils/constants'
  *   submitted ──(rep)──▶ rep_review ──(rep)──▶ ho_review ──(HO)──▶ approved
  *                                                          └──(HO)──▶ rejected
  *
- * The endpoints in API.md (POST /proposals, GET /proposals, GET /proposals/{id},
- * PUT /proposals/{id}/advance) are not wired up in this environment yet, so this
- * module runs against an in-memory mock returning the exact shapes from the
- * contract. Every function keeps its real `api` call beside the mock behind
- * USING_MOCK_PROPOSALS — flip the flag and the screens above keep working.
+ * Live against the API: POST /proposals, GET /proposals, GET /proposals/{id} and
+ * PUT /proposals/{id}/advance all exist and enforce the state machine plus the
+ * role allowed to perform each transition (403 otherwise, 422 on a terminal
+ * state). The mock branch behind USING_MOCK_PROPOSALS is kept for working
+ * offline.
  *
- * Two fields are mock-only enrichments, documented where they are used:
- *  - `notes` is an array (a thread). The real proposal carries a single optional
- *    `notes` string, so the real branch wraps it into a one-entry thread and
- *    consumers only ever see one shape. A real thread needs a backend endpoint.
- *  - `agreement_id` is node 5 of the stepper. The backend has no proposal →
- *    agreement link field yet; until it does, only seeded records carry one.
+ * Three places where the contract is narrower than the screen, all handled here:
+ *
+ * - **`notes` is one optional string, not a thread.** `normalize()` wraps it into
+ *   a one-entry thread so the panel renders one shape either way, and
+ *   SUPPORTS_PROPOSAL_NOTES tells the page there is nothing to append to.
+ * - **A rejection carries no reason.** `PUT /advance` accepts `decision` and
+ *   nothing else (unknown fields are rejected outright), so the reason field is
+ *   hidden rather than collected and dropped — see SUPPORTS_REJECTION_REASON.
+ * - **No proposal → agreement link.** `agreement_id` is absent live, so the final
+ *   stepper node stays pending until the backend records it.
  */
 
-export const USING_MOCK_PROPOSALS = true
+export const USING_MOCK_PROPOSALS = false
+
+/** No POST /proposals/{id}/notes: the thread is read-only after submission. */
+export const SUPPORTS_PROPOSAL_NOTES = USING_MOCK_PROPOSALS
+
+/**
+ * `ProposalAdvanceSchema` accepts `decision` alone and rejects unknown fields, so
+ * a reason typed into a form could only be discarded. Better not to ask for it.
+ */
+export const SUPPORTS_REJECTION_REASON = USING_MOCK_PROPOSALS
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -196,13 +210,19 @@ async function create({ customerId, customer, proposedAmount, productType, note:
   return { ...rec }
 }
 
-/** GET /proposals — paginated, optional `status` filter, scoped to the caller. */
+/**
+ * GET /proposals — paginated, optional `status` filter, scoped to the caller.
+ *
+ * List rows carry `customer_id` but no nested customer (only detail does), so the
+ * names are joined on from one `/customers` read — see customerLookup.
+ */
 async function list({ page = 1, perPage = 10, status = '' } = {}) {
   if (!USING_MOCK_PROPOSALS) {
     const { data } = await api.get('/proposals', {
       params: { page, per_page: perPage, ...(status ? { status } : {}) },
     })
-    return { items: data.items.map(normalize), pagination: data.pagination }
+    const items = await attachCustomers((data.items ?? []).map(normalize))
+    return { items, pagination: data.pagination }
   }
 
   await delay(300)
@@ -292,15 +312,19 @@ async function advance(id, { decision, reason, role, author } = {}) {
 }
 
 /**
- * Append a note to the thread. Mock-only — a real backend needs a
- * POST /proposals/{id}/notes endpoint; until then the real branch would have to
- * fold the note into the single `notes` string, which is lossy, so it throws
- * rather than pretending to succeed.
+ * Append a note to the thread. Mock-only — there is no
+ * POST /proposals/{id}/notes, and the live proposal keeps one `notes` string that
+ * was set at submission, so an append could only overwrite it. The page reads
+ * SUPPORTS_PROPOSAL_NOTES and hides the composer; this throws rather than
+ * reporting a save that never happened.
  */
 async function addNote(id, { body, author, role }) {
   if (!USING_MOCK_PROPOSALS) {
-    const { data } = await api.post(`/proposals/${id}/notes`, { body })
-    return normalize(data)
+    throw {
+      message: 'Adding notes to a proposal is not supported by the API yet.',
+      fieldErrors: {},
+      status: 501,
+    }
   }
 
   await delay(350)

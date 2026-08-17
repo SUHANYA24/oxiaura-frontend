@@ -4,7 +4,8 @@ import { ROLES } from '@/utils/constants'
 /**
  * Employees & KPIs.
  *
- * The contract (API.md) is two endpoints, both management-only:
+ * The contract (API.md) is two endpoints, both management-only — a sales rep gets
+ * 403, which is why the nav hides the section rather than linking to a refusal:
  *   GET  /employees?month&year          → one KPI row per user for that month
  *   POST /employees/{user_id}/targets   → upsert a monthly target (admin only)
  *
@@ -12,10 +13,9 @@ import { ROLES } from '@/utils/constants'
  * `actual_customers` and generating an agreement adds to `actual_revenue`, so
  * this module only ever writes targets.
  *
- * Those endpoints are not wired up in this environment yet, so the module runs
- * against an in-memory mock returning the exact shapes from the contract. Every
- * function keeps its real `api` call beside the mock behind USING_MOCK_EMPLOYEES
- * — flip the flag and the screens above keep working.
+ * Both endpoints are live. The mock branch behind USING_MOCK_EMPLOYEES is kept
+ * for working offline, and it is the only place the twelve months of history and
+ * the full performance spread come from.
  *
  * Two things the contract does not give us, and what is done about each:
  *  - **No `GET /employees/{id}`.** `get()` pulls the month's list and picks the
@@ -27,10 +27,11 @@ import { ROLES } from '@/utils/constants'
  *    of one function.
  *
  * `branch` (a name) is a mock-only enrichment — the API returns `branch_id`
- * alone. Callers fall back to the id, so the label degrades rather than breaks.
+ * alone. Callers resolve it through `branchName()` and fall back to the id, so
+ * the label degrades rather than breaks.
  */
 
-export const USING_MOCK_EMPLOYEES = true
+export const USING_MOCK_EMPLOYEES = false
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -41,14 +42,16 @@ const invalid = (fieldErrors) => ({ message: 'Validation failed.', fieldErrors, 
 
 /* --------------------------------------------------------------- mock state */
 
+// Branch ids track the two rows the backend actually seeds (see BRANCHES in
+// utils/constants) so a mock row and a live row resolve to the same label.
 const EMPLOYEES = [
-  { user_id: 2, full_name: 'Nadeesha Wickramasinghe', email: 'nadeesha@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, branch: 'Kandy Main', is_active: true },
-  { user_id: 3, full_name: 'Tharindu Rajapaksa', email: 'tharindu@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, branch: 'Kandy Main', is_active: true },
-  { user_id: 4, full_name: 'Ishara Gunawardena', email: 'ishara@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, branch: 'Galle', is_active: true },
-  { user_id: 5, full_name: 'Chamath Dissanayake', email: 'chamath@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, branch: 'Galle', is_active: true },
-  { user_id: 6, full_name: 'Sanduni Herath', email: 'sanduni@plantvest.lk', role: ROLES.SALES_REP, branch_id: 3, branch: 'Colombo Head Office', is_active: true },
-  { user_id: 7, full_name: 'Mahesh Ekanayake', email: 'mahesh@plantvest.lk', role: ROLES.SALES_REP, branch_id: 3, branch: 'Colombo Head Office', is_active: true },
-  { user_id: 8, full_name: 'Dilani Amarasinghe', email: 'dilani@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 3, branch: 'Colombo Head Office', is_active: true },
+  { user_id: 2, full_name: 'Nadeesha Wickramasinghe', email: 'nadeesha@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, branch: 'Colombo HQ', is_active: true },
+  { user_id: 3, full_name: 'Tharindu Rajapaksa', email: 'tharindu@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, branch: 'Colombo HQ', is_active: true },
+  { user_id: 4, full_name: 'Ishara Gunawardena', email: 'ishara@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, branch: 'Kandy Branch', is_active: true },
+  { user_id: 5, full_name: 'Chamath Dissanayake', email: 'chamath@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, branch: 'Kandy Branch', is_active: true },
+  { user_id: 6, full_name: 'Sanduni Herath', email: 'sanduni@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, branch: 'Colombo HQ', is_active: true },
+  { user_id: 7, full_name: 'Mahesh Ekanayake', email: 'mahesh@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, branch: 'Kandy Branch', is_active: true },
+  { user_id: 8, full_name: 'Dilani Amarasinghe', email: 'dilani@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 1, branch: 'Colombo HQ', is_active: true },
 ]
 
 /**
@@ -153,7 +156,7 @@ function buildRow(employee, month, year) {
 async function list({ month = CURRENT.month, year = CURRENT.year } = {}) {
   if (!USING_MOCK_EMPLOYEES) {
     const { data } = await api.get('/employees', { params: { month, year } })
-    return { items: data.items, month: Number(month), year: Number(year) }
+    return { items: data.items ?? [], month: Number(month), year: Number(year) }
   }
 
   await delay(350)
@@ -192,8 +195,18 @@ async function history(userId, { months = 6, month = CURRENT.month, year = CURRE
       periods.map((period) => api.get('/employees', { params: { month: period.month, year: period.year } })),
     )
     return responses.map(({ data }, index) => {
-      const row = data.items.find((item) => String(item.user_id) === String(userId))
-      return row ?? { ...periods[index], ...EMPTY_KPI, target_revenue: '0.00', actual_revenue: '0.00', customer_achievement_pct: null, revenue_achievement_pct: null }
+      const row = (data.items ?? []).find((item) => String(item.user_id) === String(userId))
+      return (
+        row ?? {
+          user_id: Number(userId),
+          ...periods[index],
+          ...EMPTY_KPI,
+          target_revenue: '0.00',
+          actual_revenue: '0.00',
+          customer_achievement_pct: null,
+          revenue_achievement_pct: null,
+        }
+      )
     })
   }
 

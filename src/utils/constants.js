@@ -32,18 +32,18 @@ export const ROLE_OPTIONS = ALL_ROLES.map((role) => ({ value: role, label: ROLE_
  *
  * The contract has no `/branches` endpoint — a user carries a bare `branch_id`
  * — so this is both the id → name lookup and the option list every branch
- * selector and filter reads. The ids are the ones the employee and user mocks
- * assign, so a filter can never offer a branch the data does not use.
+ * selector and filter reads. **The ids and names below mirror the rows the
+ * backend actually seeds** (`branches` table: 1 = Colombo HQ, 2 = Kandy Branch);
+ * inventing extra branches here would let a filter ask for a `branch_id` the
+ * server can never return, and would label the seeded rep's branch wrongly.
  *
  * When the API grows a branches endpoint this becomes a fetch; callers already
  * ask for `branchName(id)` rather than indexing the array, so nothing above
  * this file changes.
  */
 export const BRANCHES = [
-  { id: 1, name: 'Kandy Main' },
-  { id: 2, name: 'Galle' },
-  { id: 3, name: 'Colombo Head Office' },
-  { id: 4, name: 'Kurunegala' },
+  { id: 1, name: 'Colombo HQ' },
+  { id: 2, name: 'Kandy Branch' },
 ]
 
 export const BRANCH_OPTIONS = BRANCHES.map((branch) => ({
@@ -217,10 +217,16 @@ export const DOC_TYPES = [
 /**
  * Fraud severity bands from the design system. One definition, so a score never
  * reads as "Review" on one screen and "Flagged" on another.
+ *
+ * The Flagged band begins where the backend's own decision does: the aggregate is
+ * `0.3·ELA + 0.4·CNN + 0.3·Siamese` on a 0–100 scale, and the API sets
+ * `is_flagged` (verdict `flagged` rather than `clear`) once it passes
+ * FRAUD_FLAG_THRESHOLD, 60 by default. A wider Review band would paint a document
+ * amber that the API has already flagged.
  */
 export const FRAUD_BANDS = [
   { max: 39, verdict: 'Safe', variant: 'ok' },
-  { max: 69, verdict: 'Review', variant: 'warn' },
+  { max: 60, verdict: 'Review', variant: 'warn' },
   { max: 100, verdict: 'Flagged', variant: 'danger' },
 ]
 

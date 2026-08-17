@@ -1,17 +1,41 @@
-import api from './api'
+import api, { UPLOAD_TIMEOUT } from './api'
+import customerService from './customerService'
 
 /**
  * Documents — upload, OCR extraction, and the fraud pipeline.
  *
- * The document endpoints are Celery-backed on the server (OCR + ELA/CNN/Siamese
- * fraud analysis) and are not wired up in this environment yet. So this whole
- * module runs against an in-memory mock that returns the exact shapes from
- * API.md. Every function keeps its real `api` call written beside the mock,
- * behind USING_MOCK_DOCUMENTS — flip the flag to false and every screen above
- * this file keeps working against the live API with no other change.
+ * Live against the API: `/documents/upload`, `/documents/{id}`, `/ocr-result`,
+ * `/fraud-report`, `/jobs/{task_id}` and `/verify` are all real endpoints.
+ *
+ * Two things the contract does not offer, and what happens instead:
+ *
+ * - **No global document list.** Documents are reachable per id or nested on a
+ *   customer, so `recent()` walks the customers the caller can see and collects
+ *   their documents. Anything uploaded in this session is remembered locally too,
+ *   so a fresh upload shows up before the customer list is re-read.
+ * - **No endpoint for OCR corrections** (`SUPPORTS_OCR_CORRECTIONS`). The upload
+ *   screen reads that flag and presents low-confidence fields read-only rather
+ *   than offering a save that would go nowhere.
+ *
+ * The mock branch behind USING_MOCK_DOCUMENTS is kept — it is how the pipeline
+ * screens are exercised when the Celery broker is not running (upload blocks on
+ * the queue dispatch when Redis is down). Flip the flag to true for that.
  */
 
-export const USING_MOCK_DOCUMENTS = true
+export const USING_MOCK_DOCUMENTS = false
+
+/**
+ * No endpoint accepts corrected OCR fields. Editing them client-side and
+ * reporting "saved" would be a lie, so the UI hides the affordance instead.
+ */
+export const SUPPORTS_OCR_CORRECTIONS = USING_MOCK_DOCUMENTS
+
+/**
+ * The fraud report download is assembled in the browser from the live report —
+ * `/documents/{id}/fraud-report/download` does not exist. Real values, local
+ * rendering, so the flag reflects the format rather than the data.
+ */
+export const FRAUD_REPORT_IS_CLIENT_RENDERED = true
 
 /** The five pipeline stages, in order — the UI renders one row per stage. */
 export const PIPELINE_STAGES = [
@@ -21,6 +45,55 @@ export const PIPELINE_STAGES = [
   { id: 'cnn', label: 'CNN forgery check' },
   { id: 'siamese', label: 'Siamese duplicate match' },
 ]
+
+/**
+ * What the live job endpoint can actually report.
+ *
+ * One Celery task (`documents.process_document`) runs OCR *and* all three fraud
+ * engines, and it publishes no intermediate progress — `GET /documents/jobs/{id}`
+ * answers `PENDING`, `STARTED`, `SUCCESS` or `FAILURE` and nothing between. So
+ * the live indicator shows the two transitions that are real rather than
+ * animating five stages it cannot observe; PIPELINE_STAGES still names what the
+ * analysis step covers, and the screen lists those engines beside it.
+ */
+const LIVE_STAGES = [
+  { id: 'queued', label: 'Queued for analysis' },
+  { id: 'analysis', label: 'OCR extraction & fraud analysis' },
+]
+
+/** Celery states that mean the worker has picked the job up. */
+const RUNNING_STATES = new Set(['STARTED', 'PROGRESS', 'RETRY'])
+
+function liveStages(state) {
+  if (state === 'SUCCESS') return LIVE_STAGES.map((s) => ({ ...s, status: 'done' }))
+  if (state === 'FAILURE' || state === 'REVOKED') {
+    return [
+      { ...LIVE_STAGES[0], status: 'done' },
+      { ...LIVE_STAGES[1], status: 'failed' },
+    ]
+  }
+  if (RUNNING_STATES.has(state)) {
+    return [
+      { ...LIVE_STAGES[0], status: 'done' },
+      { ...LIVE_STAGES[1], status: 'active' },
+    ]
+  }
+  // PENDING — queued but not yet claimed by a worker.
+  return [
+    { ...LIVE_STAGES[0], status: 'active' },
+    { ...LIVE_STAGES[1], status: 'pending' },
+  ]
+}
+
+
+/**
+ * Documents uploaded during this browser session, newest last.
+ *
+ * The API has no global document list, and re-reading every customer takes a
+ * moment; this makes a just-uploaded document appear in "Recent uploads" at once
+ * and survives nothing beyond a reload, which is exactly its scope.
+ */
+const session = new Map()
 
 /* --------------------------------------------------------------- mock state */
 
@@ -174,9 +247,15 @@ async function upload({ customerId, docType, file }, { onProgress } = {}) {
     form.append('doc_type', docType)
     form.append('file', file)
     const { data } = await api.post('/documents/upload', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+      // Let axios set the multipart boundary; naming the type without one makes
+      // Flask's parser reject the body.
+      headers: { 'Content-Type': undefined },
+      timeout: UPLOAD_TIMEOUT,
       onUploadProgress: (e) => onProgress?.(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
     })
+    // Remembered so "Recent uploads" shows this document immediately, before the
+    // per-customer walk below would pick it up.
+    session.set(data.id, { ...data, file_name: file?.name ?? null })
     return data
   }
 
@@ -221,16 +300,25 @@ async function upload({ customerId, docType, file }, { onProgress } = {}) {
 /**
  * Pipeline progress for the stage-by-stage indicator.
  *
- * Real shape (GET /documents/jobs/{task_id}) is `{ task_id, state, result }`.
- * The per-stage `stages` array is a mock enrichment: in production the UI would
- * derive the same five rows by polling the OCR endpoint (preprocessing + OCR)
- * and the fraud endpoint (ELA + CNN + Siamese) for readiness. `done` is the
- * single signal usePolling stops on.
+ * `GET /documents/jobs/{task_id}` answers `{ task_id, state, result }` (plus
+ * `error` on failure). `stages` and `done` are added here so the screen has one
+ * shape to render regardless of which branch produced it — see LIVE_STAGES for
+ * why the live list is two rows rather than five.
+ *
+ * A FAILURE is reported as done-with-error rather than thrown: the poll itself
+ * succeeded, and the caller needs the state to stop polling and explain why.
  */
 async function job(taskId) {
   if (!USING_MOCK_DOCUMENTS) {
     const { data } = await api.get(`/documents/jobs/${taskId}`)
-    return { ...data, done: data.state === 'SUCCESS' || data.state === 'FAILURE' }
+    const failed = data.state === 'FAILURE' || data.state === 'REVOKED'
+    return {
+      ...data,
+      stages: liveStages(data.state),
+      failed,
+      error: data.error ?? null,
+      done: data.state === 'SUCCESS' || failed,
+    }
   }
 
   const id = taskIndex.get(taskId)
@@ -254,6 +342,8 @@ async function job(taskId) {
     state: done ? 'SUCCESS' : cleared === 0 && elapsed < 300 ? 'PENDING' : 'PROGRESS',
     stages,
     done,
+    failed: false,
+    error: null,
     result: done ? { document_id: id } : null,
   }
 }
@@ -300,14 +390,19 @@ async function fraudReport(id) {
 }
 
 /**
- * Persist staff corrections to low-confidence OCR fields. No dedicated endpoint
- * exists in API.md yet (likely a future PATCH /documents/{id}/ocr-result), so
- * this is mock-only for now — a corrected field is promoted to full confidence.
+ * Persist staff corrections to low-confidence OCR fields.
+ *
+ * There is no endpoint for this — `SUPPORTS_OCR_CORRECTIONS` is false against the
+ * live API and the upload screen hides the editor accordingly. The mock branch
+ * keeps the flow exercisable: a corrected field is promoted to full confidence.
  */
 async function saveCorrections(id, corrections) {
   if (!USING_MOCK_DOCUMENTS) {
-    const { data } = await api.patch(`/documents/${id}/ocr-result`, { fields: corrections })
-    return data
+    throw {
+      message: 'Saving OCR corrections is not supported by the API yet.',
+      fieldErrors: {},
+      status: 501,
+    }
   }
   const record = store.get(Number(id))
   if (!record) throw { message: 'Document not found.', fieldErrors: {}, status: 404 }
@@ -333,67 +428,113 @@ async function verify(id, { decision, reason } = {}) {
 }
 
 /**
- * Download a fraud report. API.md exposes no report-download endpoint yet, so
- * the mock assembles a plain-text summary client-side; the real branch would
- * stream a server-rendered PDF. Returns { blob, filename } for the caller to
- * turn into an object URL and save.
+ * A fraud report the reviewer can keep.
+ *
+ * `/documents/{id}/fraud-report/download` does not exist, so the summary is
+ * rendered in the browser from the live report and metadata — real numbers, local
+ * typesetting (see FRAUD_REPORT_IS_CLIENT_RENDERED). Returns `{ blob, filename }`
+ * for the caller to turn into an object URL and save.
  */
-async function downloadReport(id) {
-  if (!USING_MOCK_DOCUMENTS) {
-    const { data } = await api.get(`/documents/${id}/fraud-report/download`, {
-      responseType: 'blob',
-    })
-    return { blob: data, filename: `fraud-report-${id}.pdf` }
-  }
-  const record = store.get(Number(id))
-  if (!record) throw { message: 'Document not found.', fieldErrors: {}, status: 404 }
-  const f = record.fraud
-  const lines = [
+function renderReportText(meta, fraud) {
+  return [
     'PlantVest AI — Fraud analysis report',
     '=====================================',
     '',
-    `Document ID        : ${record.id}`,
-    `Document type      : ${record.doc_type}`,
-    `Customer ID        : ${record.customer_id}`,
-    `SHA-256            : ${record.sha256_hash}`,
-    `Uploaded at        : ${record.uploaded_at}`,
-    `Verification       : ${record.verification_status}`,
+    `Document ID        : ${meta.id}`,
+    `Document type      : ${meta.doc_type}`,
+    `Customer ID        : ${meta.customer_id}`,
+    `SHA-256            : ${meta.sha256_hash}`,
+    `Uploaded at        : ${meta.uploaded_at}`,
+    `Verification       : ${meta.verification_status}`,
     '',
     'Sub-scores',
     '----------',
-    `ELA score          : ${f.ela_score}`,
-    `CNN fraud score    : ${f.cnn_fraud_score}`,
-    `Siamese similarity : ${f.siamese_similarity}`,
+    `ELA score          : ${fraud.ela_score ?? '—'}`,
+    `CNN fraud score    : ${fraud.cnn_fraud_score ?? '—'}`,
+    `Siamese similarity : ${fraud.siamese_similarity ?? '—'}`,
     '',
-    `Aggregate score    : ${f.aggregate_score} / 100`,
-    `Verdict            : ${f.verdict}`,
-    `Flagged            : ${f.is_flagged ? 'yes' : 'no'}`,
-    `Flag reason        : ${f.flag_reason ?? '—'}`,
-    ...(f.duplicate_match
+    `Aggregate score    : ${fraud.aggregate_score ?? '—'} / 100`,
+    `Verdict            : ${fraud.verdict}`,
+    `Flagged            : ${fraud.is_flagged ? 'yes' : 'no'}`,
+    `Flag reason        : ${fraud.flag_reason ?? '—'}`,
+    ...(fraud.duplicate_match
       ? [
           '',
           'Duplicate match',
           '---------------',
-          `Matched document   : ${f.duplicate_match.document_id}`,
-          `Similarity         : ${(f.duplicate_match.similarity * 100).toFixed(1)}%`,
+          `Matched document   : ${fraud.duplicate_match.document_id}`,
+          `Similarity         : ${(fraud.duplicate_match.similarity * 100).toFixed(1)}%`,
         ]
       : []),
     '',
     `Generated at       : ${new Date().toISOString()}`,
     '',
-  ]
+  ].join('\n')
+}
+
+async function downloadReport(id) {
+  if (!USING_MOCK_DOCUMENTS) {
+    const [meta, fraud] = await Promise.all([get(id), fraudReport(id)])
+    const blob = new Blob([renderReportText(meta, fraud)], { type: 'text/plain;charset=utf-8' })
+    return { blob, filename: `fraud-report-${meta.id}.txt` }
+  }
+  const record = store.get(Number(id))
+  if (!record) throw { message: 'Document not found.', fieldErrors: {}, status: 404 }
   await delay(300)
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+  const blob = new Blob([renderReportText(metaOf(record), record.fraud)], {
+    type: 'text/plain;charset=utf-8',
+  })
   return { blob, filename: `fraud-report-${record.id}.txt` }
 }
 
 /**
- * Recent uploads for the sidebar list. API.md exposes no global document list
- * (documents are nested under a customer), so this is a mock/session view —
- * newest first.
+ * Recent uploads for the sidebar list.
+ *
+ * There is no global document list, so the live branch reads the first page of
+ * customers the caller may see and collects the `documents` each detail record
+ * nests. That is a handful of requests, capped deliberately: the panel is a
+ * convenience, not a document register, and it must not turn one page load into
+ * fifty calls. Anything uploaded in this session is merged in on top so a fresh
+ * upload is never missing from its own list.
  */
+const RECENT_LIMIT = 8
+const RECENT_CUSTOMER_SCAN = 6
+
 async function recent() {
-  if (!USING_MOCK_DOCUMENTS) return []
+  if (!USING_MOCK_DOCUMENTS) {
+    const fromSession = [...session.values()]
+
+    let scanned = []
+    try {
+      const { items } = await customerService.list({ page: 1, perPage: RECENT_CUSTOMER_SCAN })
+      const details = await Promise.all(
+        items.map((customer) => customerService.get(customer.id).catch(() => null)),
+      )
+      scanned = details
+        .filter(Boolean)
+        .flatMap((customer) =>
+          (customer.documents ?? []).map((document) => ({
+            ...document,
+            customer_id: customer.id,
+          })),
+        )
+    } catch (error) {
+      // A failed scan still leaves this session's uploads worth showing; only a
+      // genuinely empty result should read as "could not load".
+      if (!fromSession.length) throw error
+    }
+
+    // Session entries win on id — they carry the file name the server omits.
+    const byId = new Map(scanned.map((document) => [document.id, document]))
+    for (const document of fromSession) {
+      byId.set(document.id, { ...byId.get(document.id), ...document })
+    }
+
+    return [...byId.values()]
+      .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))
+      .slice(0, RECENT_LIMIT)
+  }
+
   return Array.from(store.values())
     .map((r) => ({ ...metaOf(r), file_name: r.file_name }))
     .sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))

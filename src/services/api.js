@@ -12,7 +12,21 @@ import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './token
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api/v1',
   headers: { 'Content-Type': 'application/json' },
+  // Without a timeout a request that never answers — the OCR upload when the
+  // Celery broker is down, say — leaves the caller on an indefinite spinner with
+  // nothing to retry. Slow calls set their own: see UPLOAD_TIMEOUT below.
+  timeout: 20000,
 })
+
+/**
+ * Multipart upload plus server-side hashing is legitimately slower than a JSON
+ * round trip, so the document upload gets its own ceiling rather than raising
+ * the default for everything.
+ */
+export const UPLOAD_TIMEOUT = 120000
+
+/** Server-rendered PDFs (WeasyPrint) take longer than a JSON response. */
+export const DOWNLOAD_TIMEOUT = 60000
 
 /**
  * Called when the session cannot be recovered. The store registers a handler
@@ -87,6 +101,21 @@ function normalizeError(error) {
   const status = error.response?.status
   const data = error.response?.data
 
+  // A `responseType: 'blob'` request (PDF, CSV) hands back the error body as a
+  // Blob, which cannot be read synchronously. Its own message is unavailable, so
+  // say something true about the status instead of leaking axios's
+  // "Request failed with status code 500".
+  if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    return {
+      message:
+        status >= 500
+          ? 'The server could not produce that file. Please try again.'
+          : (status === 404 ? 'That file is not available.' : 'The download was refused.'),
+      fieldErrors: {},
+      status,
+    }
+  }
+
   // Marshmallow: { error: "validation_error", messages: { field: [msg, ...] } }
   const fieldErrors = {}
   if (data?.messages && typeof data.messages === 'object') {
@@ -100,7 +129,10 @@ function normalizeError(error) {
     message = 'Please correct the highlighted fields.'
   }
   if (!error.response) {
-    message = 'Cannot reach the server. Check your connection and try again.'
+    message =
+      error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+        ? 'The server did not respond in time. It may be busy — please try again.'
+        : 'Cannot reach the server. Check your connection and try again.'
   }
 
   return { message, fieldErrors, status }
@@ -143,10 +175,13 @@ api.interceptors.response.use(
     }
 
     if (status === 403) {
-      toast.error('You do not have permission for this action.')
+      // A caller that has its own answer for "not allowed" — the dashboard falls
+      // back to rep-visible figures rather than failing — sets `skipErrorToast`
+      // so the user is not told off for a request they never made.
+      if (!original?.skipErrorToast) toast.error('You do not have permission for this action.')
     }
 
-    if (status >= 500) {
+    if (status >= 500 && !original?.skipErrorToast) {
       toast.error('The server ran into a problem. Please try again.')
     }
 

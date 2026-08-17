@@ -4,7 +4,11 @@ import toast from 'react-hot-toast'
 import { Badge, Button, Card, ErrorState, Input, Modal, Skeleton } from '@/components/ui'
 import QRDisplay from '@/components/QRDisplay'
 import PDFViewer from '@/components/PDFViewer'
-import agreementService, { computeMaturity, USING_MOCK_AGREEMENTS } from '@/services/agreementService'
+import agreementService, {
+  computeMaturity,
+  SUPPORTS_AGREEMENT_EMAIL,
+  USING_MOCK_AGREEMENTS,
+} from '@/services/agreementService'
 import { AGREEMENT_STATUS } from '@/utils/constants'
 import { formatCurrency, formatDate, formatDateTime } from '@/utils/formatters'
 import { cn } from '@/utils/cn'
@@ -195,9 +199,13 @@ export default function AgreementView() {
           <Button variant="ghost" onClick={onPrint}>
             Print
           </Button>
-          <Button variant="secondary" onClick={() => setEmailOpen(true)}>
-            Email
-          </Button>
+          {/* There is no POST /agreements/{id}/email. Hiding the action beats
+              offering a send that could only report a lie. */}
+          {SUPPORTS_AGREEMENT_EMAIL && (
+            <Button variant="secondary" onClick={() => setEmailOpen(true)}>
+              Email
+            </Button>
+          )}
           <Button variant="primary" onClick={onDownload} loading={downloading}>
             Download PDF
           </Button>
@@ -255,7 +263,7 @@ export default function AgreementView() {
       </div>
 
       <Modal
-        open={emailOpen}
+        open={emailOpen && SUPPORTS_AGREEMENT_EMAIL}
         onClose={() => !sending && setEmailOpen(false)}
         title="Email agreement"
         description="Send the signed PDF to the customer or a colleague."

@@ -1,17 +1,29 @@
-import api from './api'
+import api, { DOWNLOAD_TIMEOUT } from './api'
+import { attachCustomers } from './customerLookup'
 
 /**
  * Agreements — generation, listing, the signed-token QR, and PDF download.
  *
- * The agreement endpoints (WeasyPrint PDF render + HMAC-signed QR tokens) are
- * not wired up in this environment yet, so this module runs against an in-memory
- * mock that returns the exact shapes from API.md. Every function keeps its real
- * `api` call written beside the mock, behind USING_MOCK_AGREEMENTS — flip the
- * flag to false and every screen above this file keeps working against the live
- * API with no other change.
+ * Live against the API: `/agreements/generate`, `/agreements`, `/agreements/{id}`,
+ * `/agreements/{id}/pdf` and the public `/verify/{token}` are all real endpoints.
+ *
+ * Two contract gaps, handled here rather than in the pages:
+ *
+ * - The list item carries **no nested customer** (only detail does), so `list()`
+ *   joins the names on from `/customers` — one extra request for the whole page
+ *   instead of a name-less table.
+ * - There is **no email endpoint** (`SUPPORTS_AGREEMENT_EMAIL`); the view hides
+ *   the action rather than reporting a send that never happened.
+ *
+ * The mock branch behind USING_MOCK_AGREEMENTS is kept for working without a
+ * backend — note that PDF generation needs a healthy WeasyPrint install server
+ * side, so it is also the fallback when the renderer is broken.
  */
 
-export const USING_MOCK_AGREEMENTS = true
+export const USING_MOCK_AGREEMENTS = false
+
+/** No `POST /agreements/{id}/email` exists; the action is hidden, not faked. */
+export const SUPPORTS_AGREEMENT_EMAIL = USING_MOCK_AGREEMENTS
 
 /**
  * Maturity value on simple interest: principal + principal · rate · years.
@@ -240,11 +252,18 @@ async function generate({
   return { ...rec }
 }
 
-/** GET /agreements — paginated, scoped to the caller server-side. */
+/**
+ * GET /agreements — paginated, scoped to the caller server-side.
+ *
+ * List items carry `customer_id` and nothing else about the customer, so the
+ * names are joined on here from one `/customers` read. A failure to fetch them is
+ * not a failure to list agreements: the cards fall back to `Customer #id`.
+ */
 async function list({ page = 1, perPage = 10 } = {}) {
   if (!USING_MOCK_AGREEMENTS) {
     const { data } = await api.get('/agreements', { params: { page, per_page: perPage } })
-    return { items: data.items, pagination: data.pagination }
+    const items = await attachCustomers(data.items ?? [])
+    return { items, pagination: data.pagination }
   }
 
   await delay(300)
@@ -281,11 +300,19 @@ async function get(id) {
  * GET /agreements/{id}/pdf — the generated PDF as a blob. Returns
  * `{ blob, filename }` for the caller to preview inline or save; the real
  * branch streams the WeasyPrint bytes, the mock hands back a hand-built PDF.
+ *
+ * The server names the file in `Content-Disposition`; that name is preferred so
+ * a saved agreement carries the number the backend minted.
  */
 async function downloadPdf(id) {
   if (!USING_MOCK_AGREEMENTS) {
-    const { data } = await api.get(`/agreements/${id}/pdf`, { responseType: 'blob' })
-    return { blob: data, filename: `agreement-${id}.pdf` }
+    const response = await api.get(`/agreements/${id}/pdf`, {
+      responseType: 'blob',
+      timeout: DOWNLOAD_TIMEOUT,
+    })
+    const disposition = response.headers?.['content-disposition'] ?? ''
+    const named = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)?.[1]
+    return { blob: response.data, filename: named ?? `agreement-${id}.pdf` }
   }
   await delay(400)
   const rec = store.get(Number(id))
@@ -317,14 +344,17 @@ async function verifyByToken(token) {
 }
 
 /**
- * Email the agreement PDF to a recipient. API.md exposes no such endpoint yet
- * (a likely future POST /agreements/{id}/email), so this is mock-only — it just
- * confirms the send so the AgreementView action has real feedback.
+ * Email the agreement PDF to a recipient. There is no such endpoint — the view
+ * reads SUPPORTS_AGREEMENT_EMAIL and hides the action rather than reporting a
+ * send that never happened. The mock branch keeps the flow demonstrable.
  */
 async function email(id, recipient) {
   if (!USING_MOCK_AGREEMENTS) {
-    const { data } = await api.post(`/agreements/${id}/email`, { recipient })
-    return data
+    throw {
+      message: 'Emailing agreements is not supported by the API yet.',
+      fieldErrors: {},
+      status: 501,
+    }
   }
   await delay(600)
   const rec = store.get(Number(id))

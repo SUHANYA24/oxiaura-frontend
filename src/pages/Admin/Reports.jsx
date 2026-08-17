@@ -17,7 +17,7 @@ import {
 import reportService, {
   EXPORT_FORMATS,
   REP_OPTIONS,
-  USING_MOCK_AGGREGATES,
+  USING_MOCK_REPORT_RECORDS,
 } from '@/services/reportService'
 import {
   BRANCH_OPTIONS,
@@ -251,6 +251,18 @@ function columnsFor(type) {
 
 const FILTER_KEYS = ['type', 'from', 'to', 'branch', 'rep', 'status']
 
+/**
+ * Two exports, deliberately distinct.
+ *
+ * `Export table` writes the table on this page, which is fixture-backed —
+ * `GET /reports/records` does not exist (see USING_MOCK_REPORT_RECORDS). It stays
+ * so the file always agrees with the rows above it.
+ *
+ * `Customers CSV` is `GET /reports/export`, the only export the backend serves:
+ * customers only, CSV only, reading `date_from`, `date_to`, `branch_id` and `rep`.
+ * The report type and status filters do not reach it, so it is labelled by what it
+ * returns rather than presented as an export of whatever is on screen.
+ */
 export default function Reports() {
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -272,6 +284,9 @@ export default function Reports() {
 
   const [format, setFormat] = useState('csv')
   const [exportPct, setExportPct] = useState(null)
+  // Which export is in flight — 'table' or 'customers'. They share one progress
+  // bar because only one can run at a time, and the bar names the file.
+  const [exportKind, setExportKind] = useState(null)
 
   const rangeError = validateDateRange(from, to)
 
@@ -327,6 +342,7 @@ export default function Reports() {
   }
 
   const runExport = async () => {
+    setExportKind('table')
     setExportPct(0)
     try {
       const { blob, filename } = await reportService.exportReport(filters, {
@@ -339,6 +355,25 @@ export default function Reports() {
       toast.error(err?.message ?? 'The export could not be generated.')
     } finally {
       setExportPct(null)
+      setExportKind(null)
+    }
+  }
+
+  /** GET /reports/export — customers only, CSV only, dates/branch/rep only. */
+  const runCustomerExport = async () => {
+    setExportKind('customers')
+    setExportPct(0)
+    try {
+      const { blob, filename } = await reportService.exportCustomersCsv(filters, {
+        onProgress: setExportPct,
+      })
+      saveBlob(blob, filename)
+      toast.success(`Exported ${filename}.`)
+    } catch (err) {
+      toast.error(err?.message ?? 'The customer export could not be generated.')
+    } finally {
+      setExportPct(null)
+      setExportKind(null)
     }
   }
 
@@ -362,6 +397,8 @@ export default function Reports() {
         </div>
 
         <div className="flex items-end gap-3">
+          {/* Format is a property of the fixture export only — the live endpoint
+              answers CSV and nothing else. */}
           <Select
             label="Format"
             value={format}
@@ -371,19 +408,28 @@ export default function Reports() {
             disabled={exporting}
           />
           <Button
-            variant="primary"
+            variant="secondary"
             onClick={runExport}
-            loading={exporting}
-            disabled={Boolean(rangeError)}
+            loading={exportKind === 'table'}
+            disabled={Boolean(rangeError) || exporting}
           >
-            Export
+            Export table
+          </Button>
+          <Button
+            variant="primary"
+            onClick={runCustomerExport}
+            loading={exportKind === 'customers'}
+            disabled={Boolean(rangeError) || exporting}
+          >
+            Customers CSV
           </Button>
         </div>
       </header>
 
-      {USING_MOCK_AGGREGATES && (
+      {USING_MOCK_REPORT_RECORDS && (
         <p className="mt-4 inline-flex items-center gap-2 rounded-control border border-state-info-border bg-state-info-bg px-3 py-1.5 text-[13px] text-state-info">
-          Sample data — the report record and export endpoints are mocked in the service layer only.
+          Sample data — the table, its summary figures and Export table come from fixtures. Customers
+          CSV is the one live export.
         </p>
       )}
 
@@ -393,7 +439,9 @@ export default function Reports() {
         <div className="mt-4" role="status" aria-live="polite">
           <div className="flex items-baseline justify-between gap-3">
             <p className="text-[13px] text-ink-600">
-              Preparing the {format === 'excel' ? 'Excel' : 'CSV'} export
+              {exportKind === 'customers'
+                ? 'Preparing the customers CSV'
+                : `Preparing the ${format === 'excel' ? 'Excel' : 'CSV'} export`}
             </p>
             <p className="font-mono text-meta tabular-nums text-ink-400">{exportPct}%</p>
           </div>
@@ -410,7 +458,7 @@ export default function Reports() {
         className="mt-6"
         bodyClassName="p-4"
         title="Filters"
-        description="Dates, branch and rep apply to every figure on this page. The report type and status narrow the table."
+        description="Dates, branch and rep apply to every figure on this page and are the only four the live customers CSV reads. The report type and status narrow the table."
         actions={
           filtered ? (
             <Button size="sm" variant="ghost" onClick={clearFilters}>

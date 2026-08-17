@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Badge, Card, EmptyState, ErrorState, Select, Skeleton, Table } from '@/components/ui'
 import KPIRing from '@/components/KPIRing'
 import employeeService, { CURRENT_PERIOD, USING_MOCK_EMPLOYEES } from '@/services/employeeService'
-import { MONTH_OPTIONS, ROLE_LABELS, kpiBand, yearOptions } from '@/utils/constants'
+import { MONTH_OPTIONS, ROLE_LABELS, branchName, kpiBand, yearOptions } from '@/utils/constants'
 import { formatCompactCurrency, formatMonthYear, formatNumber, formatPercent } from '@/utils/formatters'
 import { cn } from '@/utils/cn'
 
@@ -18,10 +18,14 @@ function initials(name) {
   return `${first}${last}`.toUpperCase()
 }
 
-/** The API returns `branch_id` alone; the name is a mock-only enrichment. */
+/**
+ * The API returns `branch_id` alone — a branch *name* is a mock-only enrichment —
+ * so the id is resolved through the shared BRANCHES table and only falls back to
+ * "Branch 7" for an id that table does not know.
+ */
 function branchLabel(row) {
   if (row.branch) return row.branch
-  return row.branch_id ? `Branch ${row.branch_id}` : 'Unassigned'
+  return row.branch_id ? branchName(row.branch_id) : 'Unassigned'
 }
 
 /**

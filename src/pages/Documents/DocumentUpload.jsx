@@ -16,7 +16,11 @@ import DocumentCard from '@/components/DocumentCard'
 import useAuth from '@/hooks/useAuth'
 import usePolling from '@/hooks/usePolling'
 import customerService from '@/services/customerService'
-import documentService, { PIPELINE_STAGES, USING_MOCK_DOCUMENTS } from '@/services/documentService'
+import documentService, {
+  PIPELINE_STAGES,
+  SUPPORTS_OCR_CORRECTIONS,
+  USING_MOCK_DOCUMENTS,
+} from '@/services/documentService'
 import { cn } from '@/utils/cn'
 import { confidenceBand, DOC_TYPES, fraudVerdict, REVIEW_ROLES } from '@/utils/constants'
 
@@ -37,6 +41,11 @@ function StageRow({ label, status }) {
             <circle cx="9" cy="9" r="8" className="fill-state-ok-bg stroke-state-ok-border" strokeWidth="1" />
             <path d="m5.5 9 2.2 2.2L12.5 6.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
+        ) : status === 'failed' ? (
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" className="text-state-danger" aria-hidden="true">
+            <circle cx="9" cy="9" r="8" className="fill-state-danger-bg stroke-state-danger-border" strokeWidth="1" />
+            <path d="m6 6 6 6M12 6l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
         ) : status === 'active' ? (
           <span className="text-ink-950"><Spinner size="sm" /></span>
         ) : (
@@ -48,6 +57,7 @@ function StageRow({ label, status }) {
       </span>
       {status === 'active' && <span className="meta-label ml-auto">Running</span>}
       {status === 'done' && <span className="meta-label ml-auto text-state-ok">Done</span>}
+      {status === 'failed' && <span className="meta-label ml-auto text-state-danger">Failed</span>}
     </li>
   )
 }
@@ -197,10 +207,14 @@ export default function DocumentUpload() {
     }
   }, [doc, loadRecent])
 
+  // A finished job is not necessarily a successful one: the poll stops on
+  // FAILURE too, and there are no results to fetch in that case.
+  const jobFailed = Boolean(polling.data?.failed)
+
   useEffect(() => {
-    if (polling.status !== 'success') return
+    if (polling.status !== 'success' || jobFailed) return
     loadResults()
-  }, [polling.status, loadResults])
+  }, [polling.status, jobFailed, loadResults])
 
   /* ------------------------------------------------------------- actions */
 
@@ -426,6 +440,21 @@ export default function DocumentUpload() {
                 ))}
               </ul>
 
+              {/* The live job endpoint reports queued / running / finished for the
+                  whole task, so the engines it covers are named here rather than
+                  animated as stages the server cannot report on individually. */}
+              {!USING_MOCK_DOCUMENTS && (
+                <p className="mt-3 text-[13px] text-ink-400">
+                  Covers {PIPELINE_STAGES.map((s) => s.label).join(', ').toLowerCase()}.
+                </p>
+              )}
+
+              {jobFailed && (
+                <p className="mt-4 rounded-control border border-state-danger-border bg-state-danger-bg px-3 py-2 text-[13px] text-state-danger">
+                  {polling.data?.error ?? 'The analysis job failed on the server.'}
+                </p>
+              )}
+
               {polling.status === 'timeout' && (
                 <p className="mt-4 rounded-control border border-state-warn-border bg-state-warn-bg px-3 py-2 text-[13px] text-state-warn">
                   Analysis is taking longer than expected. You can start over or check back shortly.
@@ -452,7 +481,7 @@ export default function DocumentUpload() {
                 </div>
               )}
 
-              {(polling.status === 'timeout' || polling.status === 'error') && (
+              {(polling.status === 'timeout' || polling.status === 'error' || jobFailed) && (
                 <div className="mt-4 flex justify-end">
                   <Button variant="secondary" onClick={resetForNext}>
                     Start over
@@ -483,13 +512,17 @@ export default function DocumentUpload() {
               <div>
                 {Object.entries(fields).map(([key, field]) => {
                   const isLow = confidenceBand(field.confidence).variant === 'danger'
+                  // Editable only where a correction can actually be saved. The
+                  // API has no endpoint for it yet, so offering an input would
+                  // promise a save that goes nowhere.
+                  const editable = isLow && SUPPORTS_OCR_CORRECTIONS
                   return (
                     <div
                       key={key}
                       className="grid grid-cols-[130px_minmax(0,1fr)_auto] items-center gap-3 border-b border-ink-200 py-2.5 last:border-0"
                     >
                       <span className="meta-label">{humanize(key)}</span>
-                      {isLow ? (
+                      {editable ? (
                         <input
                           className="form-input h-8"
                           value={edits[key] ?? field.value}
@@ -497,7 +530,11 @@ export default function DocumentUpload() {
                           aria-label={`${humanize(key)} (low confidence — please verify)`}
                         />
                       ) : (
-                        <span className="truncate text-body text-ink-950">{field.value}</span>
+                        <span
+                          className={cn('truncate text-body', isLow ? 'text-state-danger' : 'text-ink-950')}
+                        >
+                          {field.value}
+                        </span>
                       )}
                       <ConfidenceChip confidence={field.confidence} />
                     </div>
@@ -505,24 +542,28 @@ export default function DocumentUpload() {
                 })}
               </div>
 
-              <div className="mt-5 flex items-center justify-between border-t border-ink-200 pt-5">
+              <div className="mt-5 flex items-center justify-between gap-4 border-t border-ink-200 pt-5">
                 <p className="text-[13px] text-ink-400">
-                  {dirtyEdits.length
-                    ? `${dirtyEdits.length} field${dirtyEdits.length > 1 ? 's' : ''} edited`
-                    : 'Low-confidence fields are editable.'}
+                  {SUPPORTS_OCR_CORRECTIONS
+                    ? dirtyEdits.length
+                      ? `${dirtyEdits.length} field${dirtyEdits.length > 1 ? 's' : ''} edited`
+                      : 'Low-confidence fields are editable.'
+                    : 'Low-confidence fields are highlighted for manual review — the API does not accept corrections yet.'}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" onClick={resetForNext}>
                     Upload another
                   </Button>
-                  <Button
-                    variant="primary"
-                    onClick={onSaveCorrections}
-                    loading={saving}
-                    disabled={!dirtyEdits.length}
-                  >
-                    Save corrections
-                  </Button>
+                  {SUPPORTS_OCR_CORRECTIONS && (
+                    <Button
+                      variant="primary"
+                      onClick={onSaveCorrections}
+                      loading={saving}
+                      disabled={!dirtyEdits.length}
+                    >
+                      Save corrections
+                    </Button>
+                  )}
                 </div>
               </div>
             </Card>

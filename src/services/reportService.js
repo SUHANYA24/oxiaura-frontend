@@ -1,71 +1,43 @@
-import api from './api'
+import api, { DOWNLOAD_TIMEOUT } from './api'
 import { BRANCHES, branchName } from '@/utils/constants'
 
 /**
- * Dashboard aggregates.
+ * Reporting: the dashboard aggregate, the report search, and the CSV export.
  *
- * The API has no reports endpoint yet — only /auth, /customers and /health
- * exist. Per the build spec, the gap is mocked *in the service layer only*, so
- * every consumer above this file already talks to the real shape and swapping
- * to `GET /reports/dashboard` is a one-file change.
+ * `GET /reports/dashboard` is **live**. It answers exactly four groups —
+ * customers (total + by_status), agreements (total + by_status +
+ * total_investment), fraud (documents_total, checked, flagged) and
+ * revenue_by_branch — and nothing else. The sparklines, month-by-month agreement
+ * volume, per-engine health and notification feed that used to come out of this
+ * file were invented; there is no endpoint behind any of them, so they are gone
+ * rather than mocked. What the dashboard shows now is what the backend counts.
  *
- * What is REAL today: total customer count and the recent customers list, both
- * read from /customers. Everything under MOCK below is invented and must not be
- * read as backend truth.
+ * Both report endpoints are management-only (`admin`, `head_office_staff`); a
+ * sales rep gets 403. The dashboard is a route every role can open, so the
+ * aggregate call is expected to fail for a rep: it is made with `skipErrorToast`
+ * and a 403 degrades to `scope: 'own'` — the customer figures they can see, and
+ * dashes for the rest — instead of an error page for a request they never made.
+ *
+ * `GET /reports/export` is live too, but it is narrower than the export control
+ * above it: **customers only, CSV only**, filtered by `date_from`, `date_to`,
+ * `branch_id` and `rep`. It is exposed as its own `exportCustomersCsv()` so the
+ * generic `exportReport()` can keep matching the table it was pressed from.
  */
 
-const MOCK = {
-  activeAgreements: 18,
-  fraudFlags: 4,
-  totalRevenue: 14_650_000,
+/**
+ * Row-level report search. `GET /reports/records` does not exist — the only
+ * report endpoints are the dashboard and the customers CSV — so the Reports
+ * screen's table, its summary tiles and the file `exportReport()` builds all come
+ * from the fixtures below. They agree with each other and with nothing on the
+ * server; the page says so.
+ */
+export const USING_MOCK_REPORT_RECORDS = true
 
-  trends: {
-    // 12 points each, oldest → newest, for the stat card sparklines.
-    customers: [6, 7, 7, 9, 8, 11, 12, 12, 14, 15, 17, 19],
-    agreements: [3, 4, 6, 5, 8, 9, 11, 10, 13, 15, 16, 18],
-    fraudFlags: [1, 0, 2, 1, 3, 2, 2, 4, 3, 5, 4, 4],
-    revenue: [4.1, 4.9, 5.4, 6.2, 7.0, 8.1, 9.3, 10.2, 11.4, 12.6, 13.5, 14.65],
-  },
-
-  monthlyVolume: [
-    { month: 'Aug', agreements: 6 },
-    { month: 'Sep', agreements: 9 },
-    { month: 'Oct', agreements: 7 },
-    { month: 'Nov', agreements: 12 },
-    { month: 'Dec', agreements: 15 },
-    { month: 'Jan', agreements: 11 },
-    { month: 'Feb', agreements: 14 },
-    { month: 'Mar', agreements: 18 },
-    { month: 'Apr', agreements: 16 },
-    { month: 'May', agreements: 21 },
-    { month: 'Jun', agreements: 19 },
-    { month: 'Jul', agreements: 24 },
-  ],
-
-  fraudAlerts: [
-    { id: 1, customerName: 'Sunil Fernando', docType: 'NIC', score: 87, raisedAt: '2026-07-21T09:14:00' },
-    { id: 2, customerName: 'Rohan Jayasuriya', docType: 'Bank slip', score: 64, raisedAt: '2026-07-20T16:40:00' },
-    { id: 3, customerName: 'Menaka Wickrama', docType: 'Bank book', score: 52, raisedAt: '2026-07-20T11:05:00' },
-    { id: 4, customerName: 'Ishara Gunawardena', docType: 'NIC', score: 31, raisedAt: '2026-07-19T14:22:00' },
-  ],
-
-  notifications: [
-    { id: 1, message: 'Agreement A-2043 was approved by head office.', at: '2026-07-22T08:30:00', severity: 'ok' },
-    { id: 2, message: 'Document for Sunil Fernando flagged at 87.', at: '2026-07-21T09:14:00', severity: 'danger' },
-    { id: 3, message: 'Three proposals are awaiting rep review.', at: '2026-07-21T07:55:00', severity: 'warn' },
-    { id: 4, message: 'Monthly KPI targets published for August.', at: '2026-07-20T17:10:00', severity: 'info' },
-  ],
-
-  engines: [
-    { id: 'ocr', name: 'OCR extraction', state: 'ok', detail: 'Operational' },
-    { id: 'ela', name: 'ELA analysis', state: 'ok', detail: 'Operational' },
-    { id: 'cnn', name: 'CNN forgery model', state: 'warn', detail: 'Degraded — elevated latency' },
-    { id: 'siamese', name: 'Siamese duplicate match', state: 'ok', detail: 'Operational' },
-  ],
-}
-
-/** True for anything the UI is showing that did not come from the API. */
-export const USING_MOCK_AGGREGATES = true
+/**
+ * Kept for consumers that ask "is anything on this screen invented?". The
+ * dashboard aggregate is real now; the report search is not.
+ */
+export const USING_MOCK_AGGREGATES = USING_MOCK_REPORT_RECORDS
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -75,23 +47,56 @@ export const EXPORT_FORMATS = [
   { value: 'excel', label: 'Excel' },
 ]
 
+/**
+ * The dashboard aggregate, plus the recent-registrations list.
+ *
+ * Two calls in parallel: `/customers` (scoped server-side, so every role gets an
+ * answer) and `/reports/dashboard` (management-only). The second is allowed to
+ * fail — 403 for a rep is the normal case, and a 5xx should not blank a page
+ * whose other half loaded — so its failure is reported alongside the data as
+ * `unavailable` rather than thrown.
+ */
 async function dashboard() {
-  // Real: the customer count and the most recent registrations.
-  const { data } = await api.get('/customers', { params: { page: 1, per_page: 5 } })
+  const recent = api.get('/customers', { params: { page: 1, per_page: 5 } })
+
+  const aggregate = api
+    .get('/reports/dashboard', { skipErrorToast: true })
+    .then(({ data }) => ({ data, unavailable: null }))
+    .catch((error) => ({
+      data: null,
+      unavailable:
+        error?.status === 403
+          ? 'forbidden'
+          : (error?.message ?? 'The aggregate figures could not be loaded.'),
+    }))
+
+  const [{ data: customers }, report] = await Promise.all([recent, aggregate])
+  const figures = report.data
 
   return {
+    // 'own' means the caller is a rep: the only figures on the screen are the
+    // ones /customers gave us for their own book.
+    scope: figures ? 'all' : 'own',
+    unavailable: report.unavailable === 'forbidden' ? null : report.unavailable,
     stats: {
-      totalCustomers: data.pagination.total,
-      activeAgreements: MOCK.activeAgreements,
-      fraudFlags: MOCK.fraudFlags,
-      totalRevenue: MOCK.totalRevenue,
+      totalCustomers: figures?.customers?.total ?? customers.pagination.total,
+      activeAgreements: figures?.agreements?.by_status?.active ?? null,
+      fraudFlags: figures?.fraud?.flagged ?? null,
+      totalRevenue: figures ? Number(figures.agreements?.total_investment ?? 0) : null,
     },
-    trends: MOCK.trends,
-    recentCustomers: data.items,
-    monthlyVolume: MOCK.monthlyVolume,
-    fraudAlerts: MOCK.fraudAlerts,
-    notifications: MOCK.notifications,
-    engines: MOCK.engines,
+    customersByStatus: figures?.customers?.by_status ?? null,
+    agreements: figures?.agreements ?? null,
+    fraud: figures?.fraud ?? null,
+    // `revenue_by_branch` omits branches with no booked investment and reps with
+    // no branch, so an empty array is a real answer ("nothing booked"), not a
+    // missing one. `branch_name` comes from the join; the id fallback is only for
+    // safety.
+    revenueByBranch: (figures?.revenue_by_branch ?? []).map((row) => ({
+      branch_id: row.branch_id,
+      branch: row.branch_name ?? branchName(row.branch_id),
+      revenue: Number(row.total_investment ?? 0),
+    })),
+    recentCustomers: customers.items,
   }
 }
 
@@ -101,36 +106,37 @@ async function dashboard() {
  * Report records.
  *
  * `GET /reports/dashboard` and `GET /reports/export` are the only report
- * endpoints API.md defines, and neither answers the row-level question the
- * Reports screen asks — "which agreements did this rep issue in June". The
- * sample endpoint that does is
+ * endpoints the API has, and neither answers the row-level question the Reports
+ * screen asks — "which agreements did this rep issue in June". The endpoint that
+ * would is
  *
  *   GET /reports/records?type&date_from&date_to&branch_id&rep&status&page
  *
  * answering `{ items, pagination, summary }`: the rows plus the aggregate over
  * the same filter set in one round trip, so the summary tiles and the table can
- * never disagree about which records they are describing.
+ * never disagree about which records they are describing. It does not exist, so
+ * everything below is a fixture and the page labels it as sample data.
  *
  * The fixtures are generated once from a fixed seed, so a row keeps its
  * reference, date and amount across reloads and a filter is reproducible.
  */
 
 /**
- * The reps a report can be filtered by. Real builds fetch this — it is the same
- * roster /employees reports on — but it ships beside the data on purpose: the
- * filter must never offer a rep the record set does not contain. Branch ids
- * match the ones userService assigns, so filtering by branch and by rep agree.
+ * The reps a report can be filtered by. It ships beside the data on purpose: the
+ * filter must never offer a rep the record set does not contain. Branch ids stay
+ * inside the two the backend seeds, so filtering by branch and by rep agree with
+ * each other and with `BRANCHES`.
  */
 const REPS = [
   { id: 2, name: 'Nadeesha Wickramasinghe', branch_id: 1 },
   { id: 3, name: 'Tharindu Rajapaksa', branch_id: 1 },
   { id: 4, name: 'Ishara Gunawardena', branch_id: 2 },
   { id: 5, name: 'Chamath Dissanayake', branch_id: 2 },
-  { id: 6, name: 'Sanduni Herath', branch_id: 3 },
-  { id: 7, name: 'Mahesh Ekanayake', branch_id: 3 },
-  { id: 8, name: 'Dilani Amarasinghe', branch_id: 3 },
-  { id: 9, name: 'Ruwan Bandara', branch_id: 4 },
-  { id: 10, name: 'Priyanka Silva', branch_id: 4 },
+  { id: 6, name: 'Sanduni Herath', branch_id: 1 },
+  { id: 7, name: 'Mahesh Ekanayake', branch_id: 2 },
+  { id: 8, name: 'Dilani Amarasinghe', branch_id: 1 },
+  { id: 9, name: 'Ruwan Bandara', branch_id: 2 },
+  { id: 10, name: 'Priyanka Silva', branch_id: 1 },
 ]
 
 export const REP_OPTIONS = REPS.map((rep) => ({ value: String(rep.id), label: rep.name }))
@@ -344,27 +350,22 @@ function summarise(scope, typeRows) {
   }
 }
 
-/** Filters → the query params the sample endpoint and /reports/export share. */
-function toParams({ dateFrom, dateTo, branchId, rep, status, type }) {
+/** Filters → the query params `/reports/export` understands. */
+function toParams({ dateFrom, dateTo, branchId, rep }) {
   const params = {}
-  if (type) params.type = type
   if (dateFrom) params.date_from = dateFrom
   if (dateTo) params.date_to = dateTo
   if (branchId) params.branch_id = branchId
   if (rep) params.rep = rep
-  if (status) params.status = status
   return params
 }
 
-/** GET /reports/records — rows plus the aggregate for the same filters. */
+/**
+ * The rows plus the aggregate for one filter set. Fixtures — see the note above
+ * `REPS`; there is no records endpoint to call, so there is no live branch to
+ * keep beside this one.
+ */
 async function records({ type = 'customers', page = 1, perPage = 10, ...filters } = {}) {
-  if (!USING_MOCK_AGGREGATES) {
-    const { data } = await api.get('/reports/records', {
-      params: { ...toParams({ ...filters, type }), page, per_page: perPage },
-    })
-    return { items: data.items, pagination: data.pagination, summary: data.summary }
-  }
-
   await delay(350)
 
   const scope = {
@@ -494,33 +495,17 @@ function filenameFrom(disposition) {
 }
 
 /**
- * GET /reports/export — the whole filtered set as a file, never just the page in
- * view. API.md answers with `text/csv` and a Content-Disposition filename, so
- * the response is read as a blob and the server's filename wins when it sends
- * one; the fallback below is only for when it does not.
+ * The filtered record set as a file. This exports what the table above it is
+ * showing — the fixtures, in the same columns, in the same order — so the file is
+ * never a different report to the one the admin was reading when they pressed the
+ * button. The server's own export is a different, narrower report; it has its own
+ * function below.
  *
- * `onProgress` receives 0–100. On the real call that is the download fraction
- * reported by axios; the mock walks it so the determinate bar is exercised.
+ * `onProgress` receives 0–100, walked here so the determinate bar is exercised.
  */
 async function exportReport({ type = 'customers', ...filters } = {}, { format = 'csv', onProgress } = {}) {
   const spec = FORMATS[format] ?? FORMATS.csv
-  const fallbackName = `${type}-export-${DATE_ONLY(new Date().toISOString())}.${spec.extension}`
-
-  if (!USING_MOCK_AGGREGATES) {
-    const response = await api.get('/reports/export', {
-      params: { ...toParams({ ...filters, type }), format },
-      responseType: 'blob',
-      onDownloadProgress: (event) => {
-        onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0)
-      },
-    })
-
-    onProgress?.(100)
-    return {
-      blob: response.data,
-      filename: filenameFrom(response.headers?.['content-disposition']) ?? fallbackName,
-    }
-  }
+  const filename = `${type}-export-${DATE_ONLY(new Date().toISOString())}.${spec.extension}`
 
   const scope = {
     dateFrom: filters.dateFrom ?? '',
@@ -541,7 +526,36 @@ async function exportReport({ type = 'customers', ...filters } = {}, { format = 
   }
 
   const fields = EXPORT_FIELDS[type] ?? EXPORT_FIELDS.customers
-  return { blob: new Blob([spec.build(fields, rows)], { type: spec.mime }), filename: fallbackName }
+  return { blob: new Blob([spec.build(fields, rows)], { type: spec.mime }), filename }
 }
 
-export default { dashboard, records, exportReport }
+/**
+ * GET /reports/export — the real thing, and the only export the API offers:
+ * **customers, as CSV**, filtered by `date_from`, `date_to`, `branch_id` and
+ * `rep`. No report type and no format to choose; a bad date is a 422.
+ *
+ * The response is `text/csv` with a Content-Disposition filename, so it is read
+ * as a blob and the server's name wins when it sends one. This is live data —
+ * unlike `exportReport()` above — which is why the two are separate calls rather
+ * than one function with a flag.
+ */
+async function exportCustomersCsv(filters = {}, { onProgress } = {}) {
+  const response = await api.get('/reports/export', {
+    params: toParams(filters),
+    responseType: 'blob',
+    timeout: DOWNLOAD_TIMEOUT,
+    onDownloadProgress: (event) => {
+      onProgress?.(event.total ? Math.round((event.loaded / event.total) * 100) : 0)
+    },
+  })
+
+  onProgress?.(100)
+  return {
+    blob: response.data,
+    filename:
+      filenameFrom(response.headers?.['content-disposition']) ??
+      `customers-export-${DATE_ONLY(new Date().toISOString())}.csv`,
+  }
+}
+
+export default { dashboard, records, exportReport, exportCustomersCsv }

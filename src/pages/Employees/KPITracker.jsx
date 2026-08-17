@@ -6,7 +6,7 @@ import { Badge, Button, Card, ErrorState, Input, Select, Skeleton, Table } from 
 import KPIRing from '@/components/KPIRing'
 import employeeService, { CURRENT_PERIOD, USING_MOCK_EMPLOYEES } from '@/services/employeeService'
 import { useAuth } from '@/hooks/useAuth'
-import { MONTH_OPTIONS, ROLE_LABELS, ROLES, kpiBand, yearOptions } from '@/utils/constants'
+import { MONTH_OPTIONS, ROLE_LABELS, ROLES, branchName, kpiBand, yearOptions } from '@/utils/constants'
 import {
   formatCompactCurrency,
   formatCurrency,
@@ -43,10 +43,13 @@ const METRICS = {
   },
 }
 
-/** The API returns `branch_id` alone; the name is a mock-only enrichment. */
+/**
+ * The API returns `branch_id` alone — a branch *name* is a mock-only enrichment —
+ * so the id is resolved through the shared BRANCHES table.
+ */
 function branchLabel(row) {
   if (row?.branch) return row.branch
-  return row?.branch_id ? `Branch ${row.branch_id}` : 'Unassigned'
+  return row?.branch_id ? branchName(row.branch_id) : 'Unassigned'
 }
 
 /* ------------------------------------------------------------------ chart */

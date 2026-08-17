@@ -35,17 +35,19 @@ const invalid = (fieldErrors) => ({ message: 'Please correct the highlighted fie
 
 /* --------------------------------------------------------------- mock state */
 
+// Branch ids stay inside the two rows the backend seeds (see BRANCHES), so the
+// Branch column resolves to a name rather than "Branch 4".
 const SEED = [
   { full_name: 'Admin User', email: 'admin@test.local', role: ROLES.ADMIN, branch_id: null, is_active: true },
   { full_name: 'Nadeesha Wickramasinghe', email: 'nadeesha@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, is_active: true },
   { full_name: 'Tharindu Rajapaksa', email: 'tharindu@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, is_active: true },
   { full_name: 'Ishara Gunawardena', email: 'ishara@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, is_active: true },
   { full_name: 'Chamath Dissanayake', email: 'chamath@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, is_active: true },
-  { full_name: 'Sanduni Herath', email: 'sanduni@plantvest.lk', role: ROLES.SALES_REP, branch_id: 3, is_active: true },
-  { full_name: 'Mahesh Ekanayake', email: 'mahesh@plantvest.lk', role: ROLES.SALES_REP, branch_id: 3, is_active: false },
-  { full_name: 'Dilani Amarasinghe', email: 'dilani@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 3, is_active: true },
-  { full_name: 'Ruwan Bandara', email: 'ruwan@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 4, is_active: true },
-  { full_name: 'Priyanka Silva', email: 'priyanka@plantvest.lk', role: ROLES.SALES_REP, branch_id: 4, is_active: false },
+  { full_name: 'Sanduni Herath', email: 'sanduni@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, is_active: true },
+  { full_name: 'Mahesh Ekanayake', email: 'mahesh@plantvest.lk', role: ROLES.SALES_REP, branch_id: 2, is_active: false },
+  { full_name: 'Dilani Amarasinghe', email: 'dilani@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 1, is_active: true },
+  { full_name: 'Ruwan Bandara', email: 'ruwan@plantvest.lk', role: ROLES.HEAD_OFFICE, branch_id: 2, is_active: true },
+  { full_name: 'Priyanka Silva', email: 'priyanka@plantvest.lk', role: ROLES.SALES_REP, branch_id: 1, is_active: false },
 ]
 
 // Registration dates walk backwards from a fixed point rather than from "now",
